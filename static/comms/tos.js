@@ -1,5 +1,5 @@
 const today = new Date();
-const price = 6; // INTEGER REPRESENTING CURRENT PRICE OF COMMISSIONS IN USD.
+const price = 10; // INTEGER REPRESENTING CURRENT PRICE OF COMMISSIONS IN USD.
 
 document.querySelector(".date").innerHTML = document.querySelector(".date").innerHTML.replace("%DATE%",new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'long', day: 'numeric' }).format(today));
 
