@@ -499,7 +499,7 @@
 
 <header>
   <h1>TTML Renderer</h1>
-  <span>v1.5 by <a target="spicy" href="https://spicylyrics.com/toxi">@toxi</a></span>
+  <span>v.1.5.1 by <a href="https://spicylyrics.org/toxi" target="spicylyrics" rel="noopener noreferrer">@toxi</a></span>
 </header>
 
 <div class="upload-panel">
@@ -924,7 +924,6 @@ function syncLoop() {
   for (const i of activeSpanSet) {
     if (!newActiveSpans.has(i)) {
       spans[i].el.classList.remove('active', 'long-word');
-      // Only mark past if this span has actually ended
       if (t >= spans[i].end) spans[i].el.classList.add('past');
     }
   }
@@ -935,8 +934,15 @@ function syncLoop() {
       s.el.classList.add('active');
       s.el.classList.remove('past');
       if (s.isLong) s.el.classList.add('long-word');
-      // On a forward jump: mark everything before this span's line as past
-      // (only do this if we're not in dead air after a seek — handled by seekToTime)
+      // Retroactively mark all earlier spans on the same line as past.
+      // This corrects skipped frames (tab unfocus, freeze) where spans were
+      // never individually activated and would otherwise stay greyed out.
+      for (let j = 0; j < i; j++) {
+        if (spans[j].lineEl === s.lineEl && !newActiveSpans.has(j)) {
+          spans[j].el.classList.remove('active', 'long-word');
+          spans[j].el.classList.add('past');
+        }
+      }
     }
   }
   activeSpanSet = newActiveSpans;
