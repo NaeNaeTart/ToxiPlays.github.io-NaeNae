@@ -430,6 +430,14 @@
     padding: 0.5rem;
   }
   #render-overlay .render-cancel:hover { color: var(--accent2); }
+  #render-preview {
+    width: 320px;
+    height: 180px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: #000;
+    image-rendering: pixelated;
+  }
   .songwriter-credit {
     font-size: 0.75em;
     opacity: 0.45;
@@ -678,6 +686,24 @@
     margin-top: auto;
   }
   .design-reset:hover { border-color: var(--accent2); color: var(--accent2); }
+
+  .design-check-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.6rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-bright);
+  }
+  .design-check-label input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 13px;
+    height: 13px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
 </style>
 </head>
 <body>
@@ -685,7 +711,7 @@
 <header>
   <h1>TTML Renderer</h1>
   <div class="contributors-wrap">
-    <span>v.2.0 by <a href="https://spicylyrics.org/toxi" target="_blank" rel="noopener noreferrer">@toxi</a></span>
+    <span>v3.0.0 by <a href="https://spicylyrics.org/toxi" target="_blank" rel="noopener noreferrer">@toxi</a></span>
     <button class="contributors-btn" id="contributors-btn" title="View contributors">▾</button>
     <div class="contributors-menu" id="contributors-menu">
       <div class="contributors-menu-title">Contributors</div>
@@ -756,6 +782,7 @@
 
 <div id="render-overlay">
   <div class="render-title">Rendering</div>
+  <canvas id="render-preview" width="320" height="180"></canvas>
   <div class="render-sub" id="render-sub">Preparing…</div>
   <div class="render-bar-track"><div class="render-bar-fill" id="render-bar-fill"></div></div>
   <button class="render-cancel" id="render-cancel">Cancel</button>
@@ -838,10 +865,40 @@
     </div>
   </div>
 
+  <!-- Export -->
+  <div class="design-section">
+    <div class="design-section-title">Export</div>
+    <div class="design-group">
+      <label class="design-check-label">
+        <input type="checkbox" id="chk-karaoke">
+        <span>Alternative karaoke-style export</span>
+      </label>
+    </div>
+  </div>
+
   <button class="design-reset" id="design-reset">Reset to Defaults</button>
 </div>
 
 <script>
+// ─── Render preview thumbnail ─────────────────────────────────────────────────
+// Shared by both export modes. Call updateRenderPreview(sourceCanvas) after
+// each frame draw; it scales the frame down to the 320×180 overlay thumbnail.
+// Internally throttled to one update every 6 s so real-time paths don't pay
+// the cost of a drawImage on every single tick.
+const _previewCanvas = document.getElementById('render-preview');
+const _previewCtx    = _previewCanvas.getContext('2d');
+let _previewLastMs   = 0;
+const PREVIEW_THROTTLE_MS = 10000;
+function updateRenderPreview(src, force) {
+  const now = performance.now();
+  if (!force && now - _previewLastMs < PREVIEW_THROTTLE_MS) return;
+  _previewLastMs = now;
+  _previewCtx.drawImage(src, 0, 0, _previewCanvas.width, _previewCanvas.height);
+}
+function clearRenderPreview() {
+  _previewCtx.clearRect(0, 0, _previewCanvas.width, _previewCanvas.height);
+}
+
 // ─── State ────────────────────────────────────────────────────────────────────
 let spans = []; // { el, begin, end, duration, isLong, lineEl }
 let lines = []; // { el, begin, end }
@@ -1440,6 +1497,8 @@ document.getElementById('btn-render').addEventListener('click', startRender);
 
 async function startRender() {
   if (!audioBuffer || !spans.length) return;
+  const isKaraoke = document.getElementById('chk-karaoke').checked;
+  if (isKaraoke) { startKaraokeRender(); return; }
 
   renderCancelled = false;
   const overlay = document.getElementById('render-overlay');
@@ -1581,6 +1640,8 @@ async function startRender() {
   const creditEl = document.querySelector('.songwriter-credit');
   const creditText = creditEl ? creditEl.textContent : null;
 
+  clearRenderPreview();
+
   // ── Audio + MediaRecorder ──
   const canvasStream = canvas.captureStream(FPS);
   const renderACtx = new AudioContext();
@@ -1604,201 +1665,545 @@ async function startRender() {
   audioSource.start(0);
   const audioStartTime = renderACtx.currentTime;
 
-  // ── Scroll logic ──
-  // SCROLL_ARRIVE: approx seconds for lerp to reach 95% of target (k=4 → ~0.75s)
-  const SCROLL_ARRIVE = 0.75;
-  const CENTER_Y = H / 2 - 20;
+}
+// ─── Karaoke-Style Video Renderer ─────────────────────────────────────────────
+// ── Minimal WebM muxer (VP9 + Opus, no external lib needed) ──────────────────
+// Encodes a sequence of pre-encoded VP9 video chunks and raw Opus audio into
+// a valid WebM container using hand-written EBML.  Supports only what we need:
+// one video track, one audio track, simple block structure, no seeking index.
+// ─── Karaoke-Style Video Renderer ─────────────────────────────────────────────
+async function startKaraokeRender() {
+  renderCancelled = false;
+  const overlay = document.getElementById('render-overlay');
+  const barFill = document.getElementById('render-bar-fill');
+  const renderSub = document.getElementById('render-sub');
+  overlay.classList.add('active');
+  document.getElementById('btn-render').classList.add('rendering');
 
-  function getScrollStartTime(entryIdx) {
-    if (entryIdx <= 0) return 0;
-    const prevEnd = layout[entryIdx - 1].lineObj.end;
-    const thisBegin = layout[entryIdx].lineObj.begin;
-    const gap = thisBegin - prevEnd;
-    // If gap is long enough to scroll during it, start scrolling SCROLL_ARRIVE before target
-    return gap > SCROLL_ARRIVE ? thisBegin - SCROLL_ARRIVE : thisBegin;
+  const W = 1280, H = 720, FPS = 30;
+  const FONT_SIZE = 52;
+  const ADLIB_FONT_SIZE = 38;
+  const LINE_H = 80;
+  const MAX_LINES = 5;
+  const CENTER_X = W / 2;
+  const BLOCK_Y_START = H / 2 - ((MAX_LINES * LINE_H) / 2);
+  const MAX_LINE_PX = W - 160; // max rendered line width before wrapping
+
+  const cs = getComputedStyle(document.documentElement);
+  const BG         = cs.getPropertyValue('--bg').trim()          || '#0a0a0f';
+  const COL_DIM    = cs.getPropertyValue('--text-dim').trim()    || '#3a3a55';
+  const COL_MID    = cs.getPropertyValue('--text-mid').trim()    || '#6a6a9a';
+  const COL_BRIGHT = cs.getPropertyValue('--text-bright').trim() || '#c8c8e8';
+  const COL_ACTIVE = cs.getPropertyValue('--accent').trim()      || '#e8f440';
+  const COL_ACTIVE2= cs.getPropertyValue('--accent2').trim()     || '#ff4d6d';
+
+  const JITTER_DUR = 0.060;
+  function easeOutExpo(x) { return 1 - Math.pow(1 - x, 3.5); }
+  function getSpanYOffset(span, t) {
+    if (t < span.begin) return 2;
+    if (t >= span.end) return 0;
+    const elapsed = t - span.begin;
+    const wordDur = span.end - span.begin;
+    if (elapsed < JITTER_DUR) return 2 + 3 * (elapsed / JITTER_DUR);
+    const p = Math.min((elapsed - JITTER_DUR) / Math.max(wordDur - JITTER_DUR, 0.001), 1);
+    return 5 * (1 - easeOutExpo(p));
   }
 
-  function getAnchorEntry(t) {
-    // 1. Active non-adlib line wins
-    for (const entry of layout) {
-      const l = entry.lineObj;
-      if (t >= l.begin && t < l.end && !entry.isAdlib) return entry;
-    }
-    // 2. Active adlib-only
-    for (const entry of layout) {
-      const l = entry.lineObj;
-      if (t >= l.begin && t < l.end) return entry;
-    }
-    // 3. In a gap — check if we should be scrolling toward the next line
-    for (let i = 0; i < layout.length; i++) {
-      if (layout[i].lineObj.begin > t) {
-        if (t >= getScrollStartTime(i)) return layout[i];
-        break; // not yet time to scroll; fall through to last-past
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // ── Step 1: walk DOM to collect tokens (spans + spacing) per line ─────────────
+  // A "token" is either a timed span or a text-node (spacing/punctuation between spans).
+  // We preserve ALL text nodes (including pure-space ones) so spacing is never lost.
+  //
+  // Result per source line: array of tokens:
+  //   { type:'span', begin, end, text }   — a timed word chunk
+  //   { type:'text', text }               — inter-span text (spaces, punctuation)
+
+  function collectLineTokens(lineEl, lineSpans) {
+    const spanByEl = new Map(lineSpans.map(s => [s.el, s]));
+    const tokens = [];
+    function walk(node) {
+      for (const child of node.childNodes) {
+        if (child.nodeType === Node.TEXT_NODE) {
+          if (child.textContent) tokens.push({ type: 'text', text: child.textContent });
+        } else if (child.classList && child.classList.contains('lyric-span')) {
+          const s = spanByEl.get(child);
+          if (s) tokens.push({ type: 'span', begin: s.begin, end: s.end, text: child.textContent });
+        } else if (child.childNodes && child.childNodes.length) {
+          walk(child);
+        }
       }
     }
-    // 4. Last past line
-    for (let i = layout.length - 1; i >= 0; i--) {
-      if (layout[i].lineObj.end <= t) return layout[i];
-    }
-    return layout.length > 0 ? layout[0] : null;
+    walk(lineEl);
+    return tokens;
   }
 
-  function getTargetOffset(t) {
-    const anchor = getAnchorEntry(t);
-    if (!anchor) return layout.length > 0 ? (layout[0].y + layout[0].totalH / 2 - CENTER_Y) : 0;
-    return anchor.y + anchor.totalH / 2 - CENTER_Y;
-  }
+  // ── Step 2: merge tokens into "words" ─────────────────────────────────────────
+  // A "word" is a run of consecutive span tokens that are NOT separated by
+  // whitespace text nodes.  Text nodes that contain only whitespace are word
+  // boundaries; text nodes with non-whitespace content (punctuation) are glued
+  // onto the preceding span.
+  //
+  // Each word: { spans:[{begin,end,text}], trailSpace:string, totalText:string }
+  // trailSpace is the whitespace text node that follows this word (may be '').
 
-  // Initialize scroll anchored to the very first line (not mid-screen void)
-  const firstOffset = layout.length > 0 ? (layout[0].y + layout[0].totalH / 2 - CENTER_Y) : 0;
-  let currentViewOffsetY = firstOffset;
-  let lastFrameWallTime = performance.now();
-
-  function drawFrame(t, viewOffsetY) {
-    ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = BG;
-    ctx.fillRect(0, 0, W, H);
-
-    for (const entry of layout) {
-      const entryTop = entry.y - viewOffsetY;
-      if (entryTop + entry.totalH < -10 || entryTop > H + 10) continue;
-
-      const l = entry.lineObj;
-      const isActive = t >= l.begin && t < l.end;
-      const isPastLine = l.end <= t;
-      const isRight = entry.agent === 'v2';
-
-      ctx.font = `${entry.fontSize}px "DM Mono", monospace`;
-      ctx.textBaseline = 'alphabetic';
-      ctx.globalAlpha = entry.isAdlib ? 0.6 : 1.0;
-
-      let rowY = entryTop;
-      for (const row of entry.rows) {
-        const rowW = row.reduce((s, seg) => s + seg.width, 0);
-        let xCursor = isRight ? (W - RIGHT_PAD - rowW) : LEFT_PAD;
-
-        for (const seg of row) {
-          if (!seg.span) {
-            ctx.shadowBlur = 0;
-            ctx.fillStyle = isPastLine ? COL_BRIGHT : (isActive ? COL_MID : COL_DIM);
-            ctx.fillText(seg.text, xCursor, rowY + entry.fontSize + 2);
+  function tokensToWords(tokens) {
+    const words = [];
+    let i = 0;
+    while (i < tokens.length) {
+      const tok = tokens[i];
+      if (tok.type === 'text') {
+        // pure text token between words — attach to previous word's trail if whitespace,
+        // or glue onto the last span if non-whitespace (e.g. bare punctuation)
+        if (/^\s+$/.test(tok.text)) {
+          if (words.length) words[words.length - 1].trailSpace += tok.text;
+        } else {
+          // non-whitespace text node (rare): glue onto last span's text
+          if (words.length) words[words.length - 1].spans[words[words.length-1].spans.length-1].text += tok.text;
+        }
+        i++;
+      } else {
+        // span token — start a new word, consuming adjacent spans with no space between
+        const wordSpans = [];
+        let trailSpace = '';
+        while (i < tokens.length) {
+          const cur = tokens[i];
+          if (cur.type === 'span') {
+            wordSpans.push({ begin: cur.begin, end: cur.end, text: cur.text });
+            i++;
+            // Look ahead: if next token is a text-node with only whitespace → word boundary
+            // If next token is a text-node with non-whitespace → glue it onto this span
+            // If next token is another span → continue the word (no space between)
+            if (i < tokens.length) {
+              const nxt = tokens[i];
+              if (nxt.type === 'text') {
+                if (/^\s+$/.test(nxt.text)) {
+                  trailSpace = nxt.text;
+                  i++; // consume the space
+                  break; // word boundary
+                } else {
+                  // non-whitespace text glued to this span
+                  wordSpans[wordSpans.length - 1].text += nxt.text;
+                  i++; // consume punctuation text node, then continue word
+                }
+              }
+              // else: next is another span → loop continues, part of same word
+            }
           } else {
-            const s = seg.span;
-            const spanActive = t >= s.begin && t < s.end;
-            const spanPast = s.end <= t;
-            const ty = getSpanY(s, t);
-            ctx.fillStyle = spanActive ? COL_ACTIVE
-                          : spanPast ? COL_BRIGHT
-                          : (isPastLine || isActive) ? COL_MID
-                          : COL_DIM;
-            ctx.shadowColor = COL_ACTIVE;
-            ctx.shadowBlur = spanActive ? 18 : 0;
-            ctx.fillText(seg.text, xCursor, rowY + entry.fontSize + ty);
+            break;
           }
-          xCursor += seg.width;
         }
-        rowY += entry.wExtra;
-      }
-
-      ctx.globalAlpha = 1.0;
-      ctx.shadowBlur = 0;
-
-      // Break bar
-      const nextEntry = layout[entry.i + 1];
-      if (nextEntry) {
-        const gap = nextEntry.lineObj.begin - l.end;
-        if (gap >= 5) {
-          const barY = entry.y + entry.totalH - viewOffsetY + 18;
-          const barW = MAX_TEXT_W * 0.5;
-          ctx.fillStyle = COL_BORDER;
-          ctx.fillRect(LEFT_PAD, barY, barW, 2);
-          if (t > l.end && t < nextEntry.lineObj.begin) {
-            ctx.fillStyle = COL_ACTIVE;
-            ctx.fillRect(LEFT_PAD, barY, barW * ((t - l.end) / gap), 2);
-          } else if (t >= nextEntry.lineObj.begin) {
-            ctx.fillStyle = COL_ACTIVE;
-            ctx.fillRect(LEFT_PAD, barY, barW, 2);
-          }
-          ctx.globalAlpha = 0.4;
-          ctx.font = `11px "DM Mono", monospace`;
-          ctx.fillStyle = COL_BRIGHT;
-          ctx.fillText(Math.round(gap) + 's', LEFT_PAD + barW + 8, barY + 2);
-          ctx.globalAlpha = 1.0;
+        if (wordSpans.length) {
+          words.push({ spans: wordSpans, trailSpace });
         }
       }
     }
+    return words;
+  }
 
-    if (creditText) {
-      const lastEntry = layout[layout.length - 1];
-      const lastDrawY = lastEntry ? (lastEntry.y + lastEntry.totalH - viewOffsetY) : H - 60;
-      if (lastDrawY + 60 > 0 && lastDrawY < H) {
-        ctx.globalAlpha = 0.4;
-        ctx.font = `14px "DM Mono", monospace`;
-        ctx.fillStyle = COL_BRIGHT;
-        // Word-wrap the credit text
-        const creditWords = creditText.split(' ');
-        let creditLine = '';
-        let creditY = lastDrawY + 40;
-        for (const word of creditWords) {
-          const test = creditLine ? creditLine + ' ' + word : word;
-          if (ctx.measureText(test).width > MAX_TEXT_W && creditLine) {
-            ctx.fillText(creditLine, LEFT_PAD, creditY);
-            creditLine = word;
-            creditY += 20;
-          } else {
-            creditLine = test;
-          }
-        }
-        if (creditLine) ctx.fillText(creditLine, LEFT_PAD, creditY);
-        ctx.globalAlpha = 1.0;
+  function wordListWidth(words, fs) {
+    ctx.font = `bold ${fs}px "DM Mono", monospace`;
+    let w = 0;
+    for (let i = 0; i < words.length; i++) {
+      for (const s of words[i].spans) w += ctx.measureText(s.text).width;
+      if (i < words.length - 1) w += ctx.measureText(words[i].trailSpace || ' ').width;
+    }
+    return w;
+  }
+
+  // Returns the split index (words[0..splitIdx-1] / words[splitIdx..end]),
+  // or -1 if the word list fits. Tries punctuation first, then word-boundary midpoint.
+  // Also returns { splitIdx, isPunctSplit } so callers know whether to capitalise.
+  function findSplitPoint(words, fs) {
+    if (wordListWidth(words, fs) <= MAX_LINE_PX) return null; // fits
+
+    const SPLIT_CHARS = /[,?!"]/;
+
+    // 1. Prefer last punctuation mark that isn't at the very last word
+    let punctSplit = -1;
+    for (let i = 0; i < words.length - 1; i++) {
+      const lastText = words[i].spans[words[i].spans.length - 1].text.trimEnd();
+      if (SPLIT_CHARS.test(lastText[lastText.length - 1])) {
+        punctSplit = i + 1;
       }
+    }
+    if (punctSplit > 0) return { splitIdx: punctSplit, isPunctSplit: true };
+
+    // 2. Fallback: split at the word boundary closest to the midpoint
+    // (never split two spans that have no space between them — those are already
+    //  one "word" object so they arrive here as a single words[] entry)
+    if (words.length < 2) return null; // can't split a single word
+    const mid = Math.floor(words.length / 2);
+    return { splitIdx: mid, isPunctSplit: false };
+  }
+
+  // ── Step 5: compute total pixel width of a word list ──────────────────────────
+  function rowPixelWidth(words, fs) {
+    return wordListWidth(words, fs);
+  }
+
+  // ── Step 6: capitalise first letter of first span in a word list ──────────────
+  function capitaliseFirstSpan(words) {
+    if (!words.length || !words[0].spans.length) return;
+    const s = words[0].spans[0];
+    s.text = s.text.charAt(0).toUpperCase() + s.text.slice(1);
+  }
+
+  // ── Step 7: strip trailing comma from last span of last word ─────────────────
+  function stripTrailingComma(words) {
+    if (!words.length) return;
+    const lastWord = words[words.length - 1];
+    const lastSpan = lastWord.spans[lastWord.spans.length - 1];
+    lastSpan.text = lastSpan.text.replace(/,\s*$/, '');
+  }
+
+  // ── Step 8: recursively split a word list into kLines that each fit MAX_LINE_PX ─
+  // Each resulting piece becomes its own kLine (one display row, no wrapping).
+  function splitIntoKLines(words, lineBegin, lineEnd, isAdlib, isV2, agent, fs) {
+    const split = findSplitPoint(words, fs);
+    if (!split) {
+      // Fits — emit as one kLine
+      ctx.font = `bold ${fs}px "DM Mono", monospace`;
+      for (const w of words) {
+        for (const s of w.spans) s.width = ctx.measureText(s.text).width;
+      }
+      const rowW = rowPixelWidth(words, fs);
+      kLines.push({ begin: lineBegin, end: lineEnd, isAdlib, isV2, agent, fs,
+                    rows: [{ words, rowW }], appearAt: lineBegin - APPEAR_BEFORE });
+      return;
+    }
+
+    const { splitIdx, isPunctSplit } = split;
+    const part1 = words.slice(0, splitIdx);
+    const part2 = words.slice(splitIdx);
+
+    if (isPunctSplit) {
+      // Strip trailing comma from end of part1 (but keep ? ! ")
+      stripTrailingComma(part1);
+      // Capitalise start of part2
+      capitaliseFirstSpan(part2);
+    }
+    // (If it's a pure word-boundary split, no capitalisation change)
+
+    const part1End = part1[part1.length - 1].spans[part1[part1.length - 1].spans.length - 1].end;
+    const part2Begin = part2[0].spans[0].begin;
+
+    // Recurse — each part may itself still be too long
+    splitIntoKLines(part1, lineBegin, part1End, isAdlib, isV2, agent, fs);
+    splitIntoKLines(part2, part2Begin, lineEnd, isAdlib, isV2, agent, fs);
+  }
+
+  // ── Step 9: build kLines from all source lines ────────────────────────────────
+  const kLines = [];
+  const APPEAR_BEFORE = 1.5;
+
+  for (const l of lines) {
+    const isAdlib = l.el.classList.contains('adlib');
+    const agent = l.el.dataset.agent || 'v1';
+    const isV2 = agent === 'v2';
+    const fs = isAdlib ? ADLIB_FONT_SIZE : FONT_SIZE;
+
+    const lineSpans = spans.filter(s => s.lineEl === l.el);
+    if (!lineSpans.length) continue;
+
+    const tokens = collectLineTokens(l.el, lineSpans);
+    let words = tokensToWords(tokens);
+    if (!words.length) continue;
+
+    if (isAdlib) {
+      words[0].spans[0].text = '(' + words[0].spans[0].text;
+      const lw = words[words.length - 1];
+      lw.spans[lw.spans.length - 1].text = lw.spans[lw.spans.length - 1].text.trimEnd() + ')';
+    }
+
+    splitIntoKLines(words, l.begin, l.end, isAdlib, isV2, agent, fs);
+  }
+
+  // ── Slot assignment ───────────────────────────────────────────────────────────
+  const slotContents = new Array(MAX_LINES).fill(-1);
+  const lineSlot = new Array(kLines.length).fill(-1);
+
+  const appearOrder = kLines.map((_,i)=>i).sort((a,b)=>kLines[a].appearAt - kLines[b].appearAt);
+  for (const idx of appearOrder) {
+    const kl = kLines[idx];
+    let slot = slotContents.indexOf(-1);
+    if (slot === -1) {
+      let oldestEnd = Infinity, oldestSlot = -1;
+      for (let s = 0; s < MAX_LINES; s++) {
+        const occ = slotContents[s];
+        if (occ !== -1 && kLines[occ].end <= kl.appearAt && kLines[occ].end < oldestEnd) {
+          oldestEnd = kLines[occ].end; oldestSlot = s;
+        }
+      }
+      if (oldestSlot !== -1) {
+        slot = oldestSlot;
+      } else {
+        let oldest = Infinity, oldestS = 0;
+        for (let s = 0; s < MAX_LINES; s++) {
+          const occ = slotContents[s];
+          if (occ !== -1 && kLines[occ].begin < oldest) { oldest = kLines[occ].begin; oldestS = s; }
+        }
+        slot = oldestS;
+      }
+    }
+    slotContents[slot] = idx;
+    lineSlot[idx] = slot;
+  }
+
+  // ── Countdown detection ───────────────────────────────────────────────────────
+  const COUNTDOWN_GAP = 5;
+  const countdowns = [];
+  if (kLines.length && kLines[0].begin > 1.0) {
+    countdowns.push({ countStart: 0, countEnd: kLines[0].begin, nextLineIdx: 0 });
+  }
+  for (let i = 0; i < kLines.length - 1; i++) {
+    const gap = kLines[i+1].begin - kLines[i].end;
+    if (gap >= COUNTDOWN_GAP) {
+      countdowns.push({ countStart: kLines[i].end, countEnd: kLines[i+1].begin, nextLineIdx: i+1 });
     }
   }
 
-  // ── Freeze-proof render loop ──
-  let lastDrawnT = -1;
+  const lastSpanEnd = spans.length ? Math.max(...spans.map(s => s.end)) : duration;
+  const creditEl = document.querySelector('.songwriter-credit');
+  const creditText = creditEl ? creditEl.textContent : null;
+  const CREDIT_FADE_START = lastSpanEnd + 0.5;
+  const CREDIT_FADE_DUR   = 2.0;
+  const LYRIC_FADE_DUR    = 1.0;
 
-  function doRenderTick() {
-    if (renderCancelled) return;
-    const now = performance.now();
-    const wallDelta = (now - lastFrameWallTime) / 1000;
-    lastFrameWallTime = now;
+  // ── Serialize kLines for worker transfer ──────────────────────────────────────
+  // ── Fallback: real-time MediaRecorder path ──────────────────────────────────
+  // Uses AudioContext clock for sync-locked rendering; no RAF, setInterval only.
+  // Implements all the same fade/fresh-canvas logic as the offline path.
 
+  const FADE_DUR = 0.4;
+
+  function getActiveCountdown_rt(t) {
+    return countdowns.find(c => t >= c.countStart && t < c.countEnd) || null;
+  }
+  function getLastEnteredGap_rt(t) {
+    let last = null;
+    for (const cd of countdowns) {
+      if (cd.countStart <= t && (!last || cd.countStart > last.countStart)) last = cd;
+    }
+    return last;
+  }
+  function countdownAlpha_rt(t, cd) {
+    return Math.min(Math.min(1, (t - cd.countStart) / FADE_DUR), Math.min(1, (cd.countEnd - t) / FADE_DUR));
+  }
+
+  function getVisibleLines_rt(t, gapEnd) {
+    const ge = gapEnd ?? -Infinity;
+    const slotNow = new Array(MAX_LINES).fill(-1);
+    for (let i = 0; i < kLines.length; i++) {
+      const kl   = kLines[i];
+      const slot = lineSlot[i];
+      if (slot === -1 || t < kl.appearAt || kl.begin < ge) continue;
+      let evicted = false;
+      for (let j = i + 1; j < kLines.length; j++) {
+        if (lineSlot[j] === slot && kLines[j].begin >= ge && t >= kLines[j].appearAt) { evicted = true; break; }
+      }
+      if (!evicted) slotNow[slot] = i;
+    }
+    return slotNow;
+  }
+
+  function slotY(slot) { return BLOCK_Y_START + slot * LINE_H + LINE_H / 2; }
+
+  function drawKaraokeRow_rt(t, kl, slotYCenter, globalAlpha) {
+    const fs = kl.fs;
+    ctx.font = `bold ${fs}px "DM Mono", monospace`;
+    ctx.textBaseline = 'middle';
+    const isActive = t >= kl.begin && t < kl.end;
+    const isPast   = kl.end <= t;
+    let alpha = 1.0;
+    if (t < kl.appearAt)   alpha = 0;
+    else if (t < kl.begin) alpha = Math.min(1, (t - kl.appearAt) / Math.min(APPEAR_BEFORE, 0.5));
+    if (kl.isAdlib) alpha *= 0.75;
+    alpha *= globalAlpha;
+    if (alpha <= 0) return;
+
+    const sweepColor = kl.isV2 ? COL_ACTIVE2 : COL_ACTIVE;
+    const baseColor  = isActive ? COL_MID : (isPast ? COL_BRIGHT : COL_DIM);
+
+    const allSpans = [];
+    let cumW = 0;
+    const rowOffs = [];
+    for (let ri = 0; ri < kl.rows.length; ri++) {
+      rowOffs.push(cumW);
+      for (let wi = 0; wi < kl.rows[ri].words.length; wi++) {
+        const w = kl.rows[ri].words[wi];
+        for (const s of w.spans) { allSpans.push({ s, lineOffset: cumW }); cumW += s.width; }
+        if (wi < kl.rows[ri].words.length - 1 && w.trailSpace) cumW += ctx.measureText(w.trailSpace).width;
+      }
+    }
+
+    let sweepPx;
+    if (isPast)        sweepPx = cumW + 1;
+    else if (!isActive) sweepPx = -1;
+    else {
+      sweepPx = 0;
+      for (const { s, lineOffset } of allSpans) {
+        if (t >= s.end)        sweepPx = lineOffset + s.width;
+        else if (t >= s.begin) { sweepPx = lineOffset + (t - s.begin) / Math.max(s.end - s.begin, 0.001) * s.width; break; }
+        else break;
+      }
+    }
+
+    let activeBeg = -1;
+    if (isActive) { for (const { s } of allSpans) { if (t >= s.begin && t < s.end) { activeBeg = s.begin; break; } } }
+
+    for (let ri = 0; ri < kl.rows.length; ri++) {
+      const row = kl.rows[ri];
+      const startX = CENTER_X - row.rowW / 2;
+      const rowSweep = sweepPx - rowOffs[ri];
+      let xC = startX;
+      for (let wi = 0; wi < row.words.length; wi++) {
+        const w = row.words[wi];
+        for (const s of w.spans) {
+          const lx = xC - startX;
+          const sp = rowSweep - lx;
+          const sf = Math.max(0, Math.min(1, sp / Math.max(s.width, 1)));
+          const drawY = slotYCenter + ri * LINE_H + getSpanYOffset(s, t);
+          ctx.globalAlpha = alpha;
+          if (sf <= 0) { ctx.fillStyle = baseColor; ctx.fillText(s.text, xC, drawY); }
+          else if (sf >= 1) { ctx.fillStyle = sweepColor; ctx.fillText(s.text, xC, drawY); }
+          else {
+            ctx.fillStyle = baseColor; ctx.fillText(s.text, xC, drawY);
+            ctx.save(); ctx.beginPath(); ctx.rect(xC, drawY - fs, sp, fs * 2); ctx.clip();
+            ctx.shadowColor = sweepColor; ctx.shadowBlur = 14; ctx.fillStyle = sweepColor; ctx.fillText(s.text, xC, drawY);
+            ctx.shadowBlur = 0; ctx.restore();
+          }
+          if (s.begin === activeBeg) {
+            ctx.save(); ctx.globalAlpha = alpha * 0.5; ctx.shadowColor = sweepColor; ctx.shadowBlur = 22;
+            ctx.fillStyle = 'rgba(0,0,0,0)'; ctx.fillText(s.text, xC, drawY); ctx.restore();
+          }
+          xC += s.width;
+        }
+        if (wi < row.words.length - 1 && w.trailSpace) {
+          ctx.globalAlpha = alpha; ctx.fillStyle = baseColor;
+          ctx.fillText(w.trailSpace, xC, slotYCenter + ri * LINE_H);
+          xC += ctx.measureText(w.trailSpace).width;
+        }
+      }
+    }
+    ctx.globalAlpha = 1; ctx.shadowBlur = 0; ctx.textBaseline = 'alphabetic';
+  }
+
+  function drawCountdown_rt(t, cd, cdAlpha) {
+    if (cdAlpha <= 0) return;
+    const remaining = cd.countEnd - t;
+    const countNum  = Math.ceil(remaining);
+    if (countNum <= 0) return;
+    const frac  = remaining - Math.floor(remaining);
+    const scale = 1 + 0.15 * Math.pow(1 - frac, 3);
+    const nA    = (0.4 + 0.6 * Math.pow(1 - frac, 2)) * cdAlpha;
+    const prog  = Math.min(1, (t - cd.countStart) / (cd.countEnd - cd.countStart));
+    const barX  = CENTER_X - 200, barY = H - 80;
+    ctx.globalAlpha = 0.3 * cdAlpha; ctx.fillStyle = COL_MID; ctx.fillRect(barX, barY, 400, 3);
+    ctx.globalAlpha = cdAlpha;       ctx.fillStyle = COL_ACTIVE; ctx.fillRect(barX, barY, 400 * prog, 3);
+    ctx.save();
+    ctx.globalAlpha = nA;
+    ctx.font = `bold ${Math.round(120 * scale)}px "DM Mono", monospace`;
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+    ctx.fillStyle = COL_ACTIVE; ctx.shadowColor = COL_ACTIVE; ctx.shadowBlur = 30;
+    ctx.fillText(String(countNum), CENTER_X, H / 2);
+    ctx.shadowBlur = 0; ctx.restore();
+    ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+  }
+
+  function drawCredits_rt(t) {
+    if (!creditText || t < CREDIT_FADE_START) return;
+    const alpha = Math.min(1, (t - CREDIT_FADE_START) / CREDIT_FADE_DUR) * 0.9;
+    if (alpha <= 0) return;
+    ctx.font = `bold 28px "DM Mono", monospace`; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+    ctx.fillStyle = COL_BRIGHT; ctx.globalAlpha = alpha;
+    const maxW = W - 200, wds = creditText.split(' ');
+    const cls = []; let ln = '';
+    for (const wd of wds) { const t2 = ln ? ln + ' ' + wd : wd; if (ctx.measureText(t2).width > maxW && ln) { cls.push(ln); ln = wd; } else ln = t2; }
+    if (ln) cls.push(ln);
+    const lh = 42; let cy = H / 2 - cls.length * lh / 2 + lh / 2;
+    for (const cl of cls) { ctx.fillText(cl, CENTER_X, cy); cy += lh; }
+    ctx.globalAlpha = 1; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  }
+
+  function drawFrame_rt(t) {
+    ctx.clearRect(0, 0, W, H); ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    let lyricAlpha = 1;
+    if (creditText && t >= CREDIT_FADE_START) lyricAlpha = Math.max(0, 1 - (t - CREDIT_FADE_START) / LYRIC_FADE_DUR);
+
+    const cd      = getActiveCountdown_rt(t);
+    const lastGap = getLastEnteredGap_rt(t);
+
+    if (cd) {
+      const cdA  = countdownAlpha_rt(t, cd);
+      const lyrA = Math.min(1, (1 - (t - cd.countStart) / FADE_DUR)) * lyricAlpha;
+      if (lyrA > 0) {
+        const slotNow = getVisibleLines_rt(t, cd.countEnd);
+        for (let slot = 0; slot < MAX_LINES; slot++) {
+          const idx = slotNow[slot];
+          if (idx !== -1 && kLines[idx].appearAt <= t) drawKaraokeRow_rt(t, kLines[idx], slotY(slot), lyrA);
+        }
+      }
+      drawCountdown_rt(t, cd, cdA);
+    } else {
+      const gapEnd = lastGap ? lastGap.countEnd : -Infinity;
+      if (lyricAlpha > 0) {
+        const slotNow = getVisibleLines_rt(t, gapEnd);
+        for (let slot = 0; slot < MAX_LINES; slot++) {
+          const idx = slotNow[slot];
+          if (idx !== -1) drawKaraokeRow_rt(t, kLines[idx], slotY(slot), lyricAlpha);
+        }
+      }
+      // Outgoing countdown: brief fade-out of number after gap ends
+      for (const c of countdowns) {
+        if (t >= c.countEnd && t < c.countEnd + FADE_DUR) {
+          drawCountdown_rt(c.countEnd - 0.001, c, 1 - (t - c.countEnd) / FADE_DUR);
+        }
+      }
+    }
+    if (t >= CREDIT_FADE_START) drawCredits_rt(t);
+  }
+
+  // Canvas + audio setup
+  clearRenderPreview();
+  const canvasStream = canvas.captureStream(FPS);
+  const renderACtx   = new AudioContext();
+  const dest         = renderACtx.createMediaStreamDestination();
+  const audioSrc     = renderACtx.createBufferSource();
+  audioSrc.buffer    = audioBuffer;
+  audioSrc.connect(dest);
+  const combinedStream = new MediaStream([...canvasStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
+  const mimeTypes = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+  const mimeType  = mimeTypes.find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+  const recorder  = new MediaRecorder(combinedStream, { mimeType, videoBitsPerSecond: 8_000_000 });
+  const chunks    = [];
+  recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  recorder.start(100);
+  audioSrc.start(0);
+  const audioStartTime = renderACtx.currentTime;
+
+  let renderDone = false;
+  function doKaraokeTick() {
+    if (renderCancelled || renderDone) return;
     const t = Math.max(renderACtx.currentTime - audioStartTime, 0);
-
-    if (t > duration + 0.5) {
+    if (t > duration + 3.5) {
+      renderDone = true;
       recorder.stop();
-      try { audioSource.stop(); } catch(e){}
+      try { audioSrc.stop(); } catch(_) {}
       renderACtx.close();
       clearInterval(intervalId);
       return;
     }
-
-    // Smooth scroll: lerp currentViewOffsetY toward target
-    const targetOffset = getTargetOffset(t);
-    const lerpFactor = 1 - Math.exp(-SCROLL_LERP * wallDelta);
-    currentViewOffsetY += (targetOffset - currentViewOffsetY) * lerpFactor;
-
-    drawFrame(t, currentViewOffsetY);
-    lastDrawnT = t;
-
-    const pct = Math.min((t / duration) * 100, 100);
+    drawFrame_rt(t);
+    updateRenderPreview(canvas);
+    const pct = Math.min(t / (duration + 3) * 100, 100);
     barFill.style.width = pct.toFixed(1) + '%';
     renderSub.textContent = formatTime(t) + ' / ' + formatTime(duration);
   }
 
-  // Heartbeat interval: fires every frame even when RAF is suppressed
-  const intervalId = setInterval(doRenderTick, 1000 / FPS);
-
-  // RAF layer on top for smoother output when the tab is active
-  function rafLoop() {
-    if (renderCancelled) { clearInterval(intervalId); return; }
-    if (renderACtx.currentTime - audioStartTime <= duration + 0.5) {
-      doRenderTick();
-      requestAnimationFrame(rafLoop);
-    }
-  }
-  requestAnimationFrame(rafLoop);
+  const intervalId = setInterval(doKaraokeTick, 1000 / FPS);
 
   recorder.onstop = () => {
     clearInterval(intervalId);
@@ -1806,15 +2211,14 @@ async function startRender() {
     document.getElementById('btn-render').classList.remove('rendering');
     if (!renderCancelled) {
       const blob = new Blob(chunks, { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'lyrics-video.webm';
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url; a.download = 'lyrics-karaoke.webm'; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
     }
   };
 }
+
 // ─── Contributors Dropdown ────────────────────────────────────────────────────
 const contribBtn = document.getElementById('contributors-btn');
 const contribMenu = document.getElementById('contributors-menu');
