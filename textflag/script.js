@@ -729,7 +729,7 @@ exportBtn.addEventListener("click", async () => {
     await navigator.clipboard.writeText(exportOutput.value);
     exportBtn.textContent = "Copied!";
     setTimeout(() => {
-      exportBtn.textContent = "Export annotations";
+      exportBtn.textContent = "Export";
     }, 1500);
   } catch (error) {
     console.error("Clipboard copy failed", error);
