@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ToxiPlays</title>
+    <title>hai ^_^</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -55,17 +55,22 @@
             line-height: 1.5;
         }
         footer {
-            margin-top: 64px;
+            margin-top: 2rem;
             color: #555;
             font-size: 0.8rem;
         }
         footer a { color: #5a6bff; text-decoration: none; }
         footer a:hover { text-decoration: underline; }
+
+        .toxi-menu-wrapper { position: relative; display: inline-block; }
+        .toxi-menu { display: none; position: absolute; top: 100%; left: 0; margin-top: 8px; background: #1a1a1a; border: 1px solid #444; border-radius: 8px; box-shadow: 0 8px 20px rgba(0,0,0,0.5); z-index: 10; min-width: 220px; padding: 8px; }
+        .toxi-menu.open { display: block; }
+        .toxi-menu a, .toxi-menu strong { display: block; color: #eee; padding: 6px 8px; text-decoration: none; font-size: 0.85rem; }
+        .toxi-menu a:hover { background: #2a2a2a; }
+        .toxi-menu strong { font-weight: 600; margin-bottom: 6px; }
     </style>
 </head>
 <body>
-    <h1>ToxiPlays</h1>
-    <p class="subtitle">A collection of projects and tools.</p>
     <div class="grid">
         <a href="/textflag/" class="card">
             <div class="card-title">TextFlag</div>
@@ -93,7 +98,41 @@
         </a>
     </div>
     <footer>
-        <a href="https://twitter.com/toilettoxi">@ToiletToxi</a> &mdash; hosted on <a href="https://pages.github.com/">GitHub Pages</a>
+        welcome to 
+        <span class="toxi-menu-wrapper">
+            <a href="#" id="toxi-link">toxi</a>
+            <div id="toxi-menu" class="toxi-menu" aria-hidden="true">
+                <strong>Are you here from...</strong>
+                <a href="https://genius.com/toxi" target="_blank" rel="noopener noreferrer">Genius?</a>
+                <a href="https://spicylyrics.org/toxi" target="_blank" rel="noopener noreferrer">Spicy Lyrics?</a>
+                <a href="https://twitter.com/toximixs" target="_blank" rel="noopener noreferrer">Twitter/X?</a>
+                <a href="#" id="toxi-discord" role="button">Discord?</a>
+            </div>
+        </span>'s <a href="https://pages.github.com/">github page</a> :) <br/>
+        made with <span style="color: #e25555;">&#10084;</span> and <span style="color: #5a6bff;">&#128187;</span> &bullet; <a href="https://github.com/ToxiPlays/ToxiPlays.github.io/tree/master/static">check out my source code</a>
     </footer>
+    <script>
+        const toxiLink = document.getElementById('toxi-link');
+        const toxiMenu = document.getElementById('toxi-menu');
+        const toxiDiscord = document.getElementById('toxi-discord');
+
+        toxiLink.addEventListener('click', function (e) {
+            e.preventDefault();
+            toxiMenu.classList.toggle('open');
+            toxiMenu.setAttribute('aria-hidden', !toxiMenu.classList.contains('open'));
+        });
+
+        toxiDiscord.addEventListener('click', function (e) {
+            e.preventDefault();
+            alert('Ooh... Gotta be smarter than that!');
+        });
+
+        document.addEventListener('click', function (e) {
+            if (!toxiLink.contains(e.target) && !toxiMenu.contains(e.target)) {
+                toxiMenu.classList.remove('open');
+                toxiMenu.setAttribute('aria-hidden', 'true');
+            }
+        });
+    </script>
 </body>
 </html>
