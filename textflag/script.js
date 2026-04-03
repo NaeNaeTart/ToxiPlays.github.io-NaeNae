@@ -13,13 +13,11 @@ if (!isWebKit) {
 const annotationTemplates = {
   "sync-too-early": {
     label: "Sync too early",
-    prefill:
-      "The sync for this section is too early for the audio provided, please resync.",
+    prefill: "The sync for this section is too early for the audio provided, please resync.",
   },
   "sync-too-late": {
     label: "Sync too late",
-    prefill:
-      "The sync for this section is delayed in the audio provided, please resync.",
+    prefill: "The sync for this section is delayed in the audio provided, please resync.",
   },
   "generic-resync": {
     label: "Generic re-sync needed",
@@ -94,8 +92,7 @@ function parseTTML(xmlDoc) {
   const cues = [];
 
   for (const p of paragraphs) {
-    const agent =
-      p.getAttribute("ttm:agent") || p.getAttribute("ttm\\:agent") || null;
+    const agent = p.getAttribute("ttm:agent") || p.getAttribute("ttm\\:agent") || null;
     const begin = p.getAttribute("begin") || "";
     const timestamp = begin.split(".")[0];
 
@@ -112,10 +109,7 @@ function parseTTML(xmlDoc) {
         continue;
       }
 
-      if (
-        node.nodeType === Node.ELEMENT_NODE &&
-        node.tagName.toLowerCase() === "span"
-      ) {
+      if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === "span") {
         const spanText = node.textContent || "";
         if (!spanText.trim()) {
           adlibLastWasSpan = false;
@@ -432,10 +426,9 @@ function renderAnnotationsForLine(line) {
 function updateLineHighlightState() {
   document.querySelectorAll(".line-main").forEach((line) => {
     const lineId = line.dataset.lineId;
-    const hasFallback = annotations.some(
-      (a) =>
-        a.lineIds.includes(lineId) &&
-        (!a.highlightElements || a.highlightElements.length === 0),
+    const hasFallback = annotations.some((a) =>
+      a.lineIds.includes(lineId) &&
+      (!a.highlightElements || a.highlightElements.length === 0),
     );
     if (hasFallback) {
       line.classList.add("line-highlight");
@@ -473,9 +466,7 @@ function formatAnnotationMarkdown(annotation) {
   let body;
 
   if (annotation.elements.length === 1) {
-    const lineText = annotation.elements[0].textContent
-      .trim()
-      .replaceAll("|", "");
+    const lineText = annotation.elements[0].textContent.trim().replaceAll("|", "");
     const raw = annotation.rawText?.trim().replaceAll("|", "") || "";
     if (raw && lineText !== raw && lineText.includes(raw)) {
       body = applyHighlightEscaping(lineText, raw);
@@ -564,7 +555,6 @@ function applyAnnotationRangeHighlight(range, lines) {
       }
     }
 
-    // If the selection does not actually intersect this line, skip.
     if (!line.contains(startNode) || !line.contains(endNode)) {
       continue;
     }
@@ -576,7 +566,6 @@ function applyAnnotationRangeHighlight(range, lines) {
       continue;
     }
 
-    // Guard against the span escaping outside of line
     const ancestor = lineRange.commonAncestorContainer;
     if (!line.contains(ancestor) && ancestor !== line) {
       continue;
@@ -668,7 +657,6 @@ annotationSaveBtn.addEventListener("click", () => {
     highlightElements: [],
   };
 
-  // apply exact-range transient highlight for user-selected span (per-line)
   const highlightEls = applyAnnotationRangeHighlight(
     currentSelectionInfo.range,
     currentSelectionInfo.lines,
@@ -762,25 +750,18 @@ container.addEventListener("click", (event) => {
   const related = annotations.filter((a) => a.lineIds.includes(lineId));
   if (!related.length) return;
 
-  const html = related
-    .map(
-      (a) =>
-        `<div><blockquote>${a.rawText.replaceAll("\n", "<br/>")}</blockquote></div><div class="annotation-choice" data-id="${a.id}"><strong>${a.reason}</strong><br>${a.text}</div>`,
-    )
-    .join("<hr>");
+  const html = related.map((a) => `<div><blockquote>${a.rawText.replaceAll("\n", "<br/>")}</blockquote></div><div class="annotation-choice" data-id="${a.id}"><strong>${a.reason}</strong><br>${a.text}</div>`,).join("<hr>");
   annotationDetails.innerHTML = html;
   activeAnnotationId = related[0].id;
   annotationViewer.classList.remove("hidden");
   annotationModal.classList.add("hidden");
 
-  document
-    .querySelectorAll("#annotationDetails .annotation-choice")
-    .forEach((el) => {
-      el.addEventListener("click", () => {
-        activeAnnotationId = el.dataset.id;
-        openAnnotationViewer(activeAnnotationId);
-      });
+  document.querySelectorAll("#annotationDetails .annotation-choice").forEach((el) => {
+    el.addEventListener("click", () => {
+      activeAnnotationId = el.dataset.id;
+      openAnnotationViewer(activeAnnotationId);
     });
+  });
 });
 
 populateAnnotationOptions();
