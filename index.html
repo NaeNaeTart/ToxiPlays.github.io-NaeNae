@@ -3,97 +3,223 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ToxiPlays</title>
+    <meta name="description" content="ToxiPlays project hub: experimental web tools, games, and utility projects.">
+    <title>ToxiPlays | Project Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #0a0f1a;
+            --bg-2: #111c2b;
+            --text: #eff7ff;
+            --muted: #b3c7d7;
+            --line: rgba(255, 255, 255, 0.15);
+            --card: rgba(255, 255, 255, 0.06);
+            --accent: #3bf4c3;
+            --accent-2: #6cc9ff;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
         body {
-            background: #111;
-            color: #eee;
-            font-family: "Segoe UI", Roboto, Arial, sans-serif;
+            background:
+                radial-gradient(circle at 85% -10%, rgba(108, 201, 255, 0.25), transparent 42%),
+                radial-gradient(circle at 5% 0%, rgba(59, 244, 195, 0.16), transparent 38%),
+                linear-gradient(160deg, var(--bg-2), var(--bg));
+            color: var(--text);
+            font-family: "Sora", "Segoe UI", sans-serif;
             min-height: 100vh;
-            padding: 48px 24px;
+            padding: 48px 24px 30px;
+            overflow-x: hidden;
         }
+
+        .frame {
+            width: min(1080px, 100%);
+            margin: 0 auto;
+        }
+
+        .hero {
+            margin-bottom: 34px;
+            padding: 24px;
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            background: linear-gradient(150deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+            backdrop-filter: blur(6px);
+            position: relative;
+        }
+
+        .hero::after {
+            content: "";
+            position: absolute;
+            width: 180px;
+            height: 180px;
+            border-radius: 50%;
+            right: -48px;
+            top: -52px;
+            background: radial-gradient(circle, rgba(59, 244, 195, 0.25), transparent 72%);
+            pointer-events: none;
+        }
+
+        .eyebrow {
+            display: inline-block;
+            font-family: "Chakra Petch", monospace;
+            font-size: 0.82rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--accent);
+            margin-bottom: 10px;
+        }
+
         h1 {
-            font-size: 2.4rem;
-            font-weight: 300;
-            letter-spacing: -1px;
-            margin-bottom: 6px;
+            font-size: clamp(2rem, 6vw, 3.4rem);
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            line-height: 1.03;
+            margin-bottom: 12px;
         }
+
         .subtitle {
-            color: #888;
-            margin-bottom: 48px;
-            font-size: 0.95rem;
+            color: var(--muted);
+            max-width: 64ch;
+            line-height: 1.65;
+            font-size: 1rem;
         }
+
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
             gap: 14px;
-            max-width: 900px;
         }
+
         .card {
-            background: #1a1a1a;
-            border: 1px solid #2a2a2a;
-            border-radius: 12px;
-            padding: 20px;
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 18px 16px;
             text-decoration: none;
             color: inherit;
-            transition: border-color 0.2s, background 0.2s;
+            transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
             display: block;
         }
+
         .card:hover {
-            border-color: #5a6bff;
-            background: #1e1e2e;
+            transform: translateY(-2px);
+            border-color: rgba(108, 201, 255, 0.8);
+            background: rgba(255, 255, 255, 0.1);
         }
+
+        .card-type {
+            font-family: "Chakra Petch", monospace;
+            font-size: 0.75rem;
+            color: var(--accent-2);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 7px;
+        }
+
         .card-title {
             font-size: 1.05rem;
-            font-weight: 600;
-            margin-bottom: 6px;
+            font-weight: 700;
+            margin-bottom: 8px;
         }
+
         .card-desc {
-            font-size: 0.85rem;
-            color: #888;
-            line-height: 1.5;
+            font-size: 0.88rem;
+            color: var(--muted);
+            line-height: 1.6;
         }
+
         footer {
-            margin-top: 64px;
-            color: #555;
-            font-size: 0.8rem;
+            margin-top: 38px;
+            color: #9fb2c2;
+            font-size: 0.88rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
         }
-        footer a { color: #5a6bff; text-decoration: none; }
-        footer a:hover { text-decoration: underline; }
+
+        footer a {
+            color: var(--accent-2);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 640px) {
+            body {
+                padding: 28px 14px 22px;
+            }
+
+            .hero {
+                padding: 18px;
+                margin-bottom: 20px;
+            }
+
+            .grid {
+                gap: 10px;
+            }
+        }
     </style>
 </head>
 <body>
-    <h1>ToxiPlays</h1>
-    <p class="subtitle">A collection of projects and tools.</p>
-    <div class="grid">
-        <a href="/textflag/" class="card">
-            <div class="card-title">TextFlag</div>
-            <div class="card-desc">Generate Markdown review notes from TTML lyric files.</div>
-        </a>
-        <a href="/gv/" class="card">
-            <div class="card-title">Gradient Viewer</div>
-            <div class="card-desc">Isolate and play with Genius page gradients using a bookmarklet.</div>
-        </a>
-        <a href="/wordy/" class="card">
-            <div class="card-title">Imperfect Wordy</div>
-            <div class="card-desc">A homemade Wordle clone with an imperfect twist.</div>
-        </a>
-        <a href="/souljafood/" class="card">
-            <div class="card-title">SouljaFood</div>
-            <div class="card-desc">A mock retail site for Soulja Boy-branded snacks. (Class project.)</div>
-        </a>
-        <a href="/ttmlrenderer/" class="card">
-            <div class="card-title">TTMLRenderer</div>
-            <div class="card-desc">Render and work with TTML content in-browser.</div>
-        </a>
-        <a href="/static/comms/" class="card">
-            <div class="card-title">Comms</div>
-            <div class="card-desc">Commission info and terms of service.</div>
-        </a>
-    </div>
-    <footer>
-        <a href="https://twitter.com/toilettoxi">@ToiletToxi</a> &mdash; hosted on <a href="https://pages.github.com/">GitHub Pages</a>
-    </footer>
+    <main class="frame">
+        <section class="hero">
+            <span class="eyebrow">ToxiPlays Network</span>
+            <h1>Projects, tools, and glorious internet nonsense.</h1>
+            <p class="subtitle">
+                This is the launchpad for everything on ToxiPlays: utility apps, experiments, and weird side quests.
+                Pick a card and jump in.
+            </p>
+        </section>
+
+        <section class="grid" aria-label="Project links">
+            <a href="/textflag/" class="card">
+                <div class="card-type">Utility</div>
+                <div class="card-title">TextFlag</div>
+                <div class="card-desc">Generate structured Markdown notes from TTML lyric files in a few clicks.</div>
+            </a>
+            <a href="/gv/" class="card">
+                <div class="card-type">Visualizer</div>
+                <div class="card-title">Gradient Viewer</div>
+                <div class="card-desc">Extract and tweak Genius-style gradients directly from song pages.</div>
+            </a>
+            <a href="/wordy/" class="card">
+                <div class="card-type">Game</div>
+                <div class="card-title">Imperfect Wordy</div>
+                <div class="card-desc">A handmade Wordle-like game with its own chaotic personality.</div>
+            </a>
+            <a href="/souljafood/" class="card">
+                <div class="card-type">Parody</div>
+                <div class="card-title">SouljaFood</div>
+                <div class="card-desc">A class project mock storefront for rapper-branded snacks and jokes.</div>
+            </a>
+            <a href="/ttmlrenderer/" class="card">
+                <div class="card-type">Renderer</div>
+                <div class="card-title">TTMLRenderer</div>
+                <div class="card-desc">Render and inspect TTML content in-browser with a practical workflow.</div>
+            </a>
+            <a href="/static/comms/" class="card">
+                <div class="card-type">Info</div>
+                <div class="card-title">Comms</div>
+                <div class="card-desc">Commission details, policies, and terms of service in one place.</div>
+            </a>
+        </section>
+
+        <footer>
+            <span>Built by</span>
+            <a href="https://estopia.net">Estopia Engineering</a>
+            <span>on</span>
+            <a href="https://pages.github.com/">GitHub Pages</a>
+        </footer>
+    </main>
 </body>
 </html>
