@@ -7,8 +7,8 @@
 body {
     margin: 15%;
     background-color: beige;
-    text-align:  center;
-    font-family: math;
+    text-align: center;
+    font-family: math, "Segoe UI", Roboto, Arial, sans-serif;
 }
 
 .disclaimer {
@@ -30,7 +30,7 @@ a {
 a:hover,
 a:focus {
     text-decoration-line: underline;
-    font-size: 150%;
+    font-size: 115%;
 }
 
 .links {
@@ -156,7 +156,7 @@ img {
     color: #41403e;
     cursor: pointer;
     display: inline-block;
-    font-family: Neucha, sans-serif;
+    font-family: math, Neucha, sans-serif;
     font-size: 1rem;
     line-height: 23px;
     outline: none;

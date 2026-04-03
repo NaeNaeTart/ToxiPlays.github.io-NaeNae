@@ -27,7 +27,7 @@ fetch("wordlist.txt")
 
 
 function handleInput() {
-    obj = document.querySelector(".wordBox");
+    let obj = document.querySelector(".wordBox");
     if (styled) {
         obj.innerHTML = obj.textContent.replaceAll(" ","").slice(0,5).toLowerCase();
         styled = false;
@@ -78,7 +78,7 @@ function handleInput() {
 }
 
 function commitStyledText() {
-    obj = document.querySelector(".wordBox");
+    let obj = document.querySelector(".wordBox");
     let word = obj.innerText;
     obj.innerHTML = "";
     obj.innerHTML = generateStyledHtml(word, false);
