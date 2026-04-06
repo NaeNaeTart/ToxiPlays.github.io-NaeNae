@@ -440,13 +440,25 @@ function updateLineHighlightState() {
 
 function getAnnotationTimestamp(annotation) {
   if (!annotation || !annotation.elements || !annotation.elements.length) {
-    return "0:00";
+    return '0:00';
   }
   const firstLineEl = annotation.elements[0];
-  const cueEl = firstLineEl.closest(".cue");
-  if (!cueEl) return "0:00";
-  const tsEl = cueEl.querySelector(".timestamp");
-  return tsEl ? tsEl.textContent.trim() : "0:00";
+  const cueEl = firstLineEl.closest('.cue');
+  if (!cueEl) return '0:00';
+  const tsEl = cueEl.querySelector('.timestamp');
+  if (tsEl) {
+    return tsEl.textContent.trim();
+  } else {
+    // Ad-lib elements don't have a timestamp element; grab the timestamp for the previous element
+    // (which should always be the main line, unless the TTML is really messed up)
+    let prev = cueEl.previousElementSibling;
+    while (prev) {
+      const prevTsEl = prev.querySelector('.timestamp');
+      if (prevTsEl) return prevTsEl.textContent.trim();
+      prev = prev.previousElementSibling;
+    }
+  }
+  return '0:00';
 }
 
 function applyHighlightEscaping(fullLine, rawText) {
