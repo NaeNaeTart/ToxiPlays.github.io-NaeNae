@@ -1,5 +1,6 @@
-let albums = JSON.parse(localStorage.getItem('albums')) || [];
+let albums = [];
 let currentAlbum = null;
+let albumsDb;
 let currentTrackIndex = -1;
 let wavesurfer = null;
 let preloadWavesurfer = null;
@@ -11,9 +12,78 @@ let originalOrder = [];
 let settings = { defaultProducers: '', defaultWriters: '', customTags: [], nicheMode: false };
 let currentLyrics = null;
 let lyricsAnimationFrameId = null;
+
 const savedSettings = localStorage.getItem('settings');
 if (savedSettings) {
     Object.assign(settings, JSON.parse(savedSettings));
+}
+
+const albumsDbRequest = indexedDB.open('AlbumsMetaDB', 1);
+albumsDbRequest.onupgradeneeded = (event) => {
+    albumsDb = event.target.result;
+    if (!albumsDb.objectStoreNames.contains('albums')) {
+        albumsDb.createObjectStore('albums', { keyPath: 'id' });
+    }
+};
+albumsDbRequest.onsuccess = (event) => {
+    albumsDb = event.target.result;
+    migrateAlbumsFromLocalStorageIfNeeded().then(() => {
+        loadAlbumsFromDb();
+    });
+};
+albumsDbRequest.onerror = (event) => {
+    console.error('Albums IndexedDB error:', event.target.error);
+};
+
+async function migrateAlbumsFromLocalStorageIfNeeded() {
+    const localAlbums = localStorage.getItem('albums');
+    if (localAlbums) {
+        try {
+            const parsed = JSON.parse(localAlbums);
+            if (Array.isArray(parsed)) {
+                for (const album of parsed) {
+                    await saveAlbumToDb(album);
+                }
+                localStorage.removeItem('albums');
+                console.log('Migrated albums from localStorage to IndexedDB.');
+            }
+        } catch (e) {
+            console.error('Error migrating albums:', e);
+        }
+    }
+}
+
+function saveAlbumToDb(album) {
+    return new Promise((resolve, reject) => {
+        const tx = albumsDb.transaction(['albums'], 'readwrite');
+        const store = tx.objectStore('albums');
+        store.put(album);
+        tx.oncomplete = resolve;
+        tx.onerror = reject;
+    });
+}
+
+function deleteAlbumFromDb(albumId) {
+    return new Promise((resolve, reject) => {
+        const tx = albumsDb.transaction(['albums'], 'readwrite');
+        const store = tx.objectStore('albums');
+        store.delete(albumId);
+        tx.oncomplete = resolve;
+        tx.onerror = reject;
+    });
+}
+
+function loadAlbumsFromDb() {
+    const tx = albumsDb.transaction(['albums'], 'readonly');
+    const store = tx.objectStore('albums');
+    const req = store.getAll();
+    req.onsuccess = () => {
+        albums = req.result || [];
+        loadFilesForAlbums();
+    };
+    req.onerror = (e) => {
+        console.error('Error loading albums from db:', e);
+    };
 }
 
 // Check if first visit
@@ -189,15 +259,23 @@ function loadFilesForAlbums() {
     });
 }
 
+
 function saveToStorage() {
-    localStorage.setItem('albums', JSON.stringify(albums.map(album => ({
-        ...album,
-        tracks: album.tracks.map(track => ({
-            ...track,
-            file: undefined, // Don't store file in localStorage
-            ttmlFile: undefined // Don't store ttml file in localStorage
-        }))
-    }))));
+    // Save all albums to IndexedDB
+    if (albumsDb) {
+        albums.forEach(album => {
+            // Remove file/ttmlFile from tracks before saving
+            const cleanAlbum = {
+                ...album,
+                tracks: album.tracks.map(track => ({
+                    ...track,
+                    file: undefined,
+                    ttmlFile: undefined
+                }))
+            };
+            saveAlbumToDb(cleanAlbum);
+        });
+    }
     localStorage.setItem('settings', JSON.stringify(settings));
 }
 
@@ -283,6 +361,16 @@ function editAlbumTitle(titleElement) {
 function renderModalTracks() {
     const container = document.getElementById('modal-tracks-container');
     container.innerHTML = '';
+    
+    // Check if all tracks are missing and album has 2+ tracks
+    const allMissing = currentAlbum.tracks.every(t => !t.file);
+    const massImportBtn = document.getElementById('mass-import-btn');
+    if (allMissing && currentAlbum.tracks.length >= 2) {
+        massImportBtn.classList.remove('hidden');
+    } else {
+        massImportBtn.classList.add('hidden');
+    }
+    
     currentAlbum.tracks.forEach((track, index) => {
         const missing = !track.file;
         const item = document.createElement('div');
@@ -604,6 +692,7 @@ function restoreTrackFile(index) {
     input.click();
 }
 
+
 function deleteAlbum() {
     if (confirm('Delete this album?')) {
         currentAlbum.tracks.forEach(track => {
@@ -613,10 +702,13 @@ function deleteAlbum() {
                 store.delete(track.fileKey);
             }
         });
-        albums = albums.filter(a => a.id !== currentAlbum.id);
-        renderAlbums();
-        saveToStorage();
-        closeModal('album-modal');
+        const albumId = currentAlbum.id;
+        albums = albums.filter(a => a.id !== albumId);
+        deleteAlbumFromDb(albumId).then(() => {
+            renderAlbums();
+            saveToStorage();
+            closeModal('album-modal');
+        });
     }
 }
 
@@ -822,9 +914,11 @@ document.getElementById('repeat-btn').addEventListener('click', () => {
 document.getElementById('new-album-btn').addEventListener('click', () => {
     const album = { id: Date.now().toString(), title: 'New Album', cover: '', tracks: [] };
     albums.push(album);
-    renderAlbums();
-    saveToStorage();
-    closeMenu();
+    saveAlbumToDb(album).then(() => {
+        renderAlbums();
+        saveToStorage();
+        closeMenu();
+    });
 });
 
 document.getElementById('help-btn').addEventListener('click', () => {
@@ -832,6 +926,57 @@ document.getElementById('help-btn').addEventListener('click', () => {
     document.getElementById('help-modal').classList.remove('hidden');
     document.getElementById('help-modal').classList.add('show');
 });
+
+document.getElementById('mass-import-btn').addEventListener('click', () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.zip';
+    input.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            await importAudioFromZip(file);
+        }
+    });
+    input.click();
+});
+
+async function importAudioFromZip(zipFile) {
+    try {
+        const zip = new JSZip();
+        const loadedZip = await zip.loadAsync(zipFile);
+        
+        const fileMap = {};
+        for (const [path, zipEntry] of Object.entries(loadedZip.files)) {
+            if (!zipEntry.dir && !path.includes('cover')) {
+                const fileName = path.split('/').pop();
+                fileMap[fileName] = zipEntry;
+            }
+        }
+        
+        let importedCount = 0;
+        for (let i = 0; i < currentAlbum.tracks.length; i++) {
+            const track = currentAlbum.tracks[i];
+            if (!track.file) {
+                const expectedFileName = `${i + 1}. ${track.originalName}`;
+                if (fileMap[expectedFileName]) {
+                    const blob = await fileMap[expectedFileName].async('blob');
+                    const audioFile = new File([blob], expectedFileName, { type: 'audio/mpeg' });
+                    track.file = audioFile;
+                    track.fileKey = track.fileKey || `${currentAlbum.id}-${track.id}`;
+                    storeFile(track.fileKey, audioFile);
+                    importedCount++;
+                }
+            }
+        }
+        
+        renderModalTracks();
+        saveToStorage();
+        alert(`Successfully imported ${importedCount} audio file(s).`);
+    } catch (error) {
+        console.error('Error importing from ZIP:', error);
+        alert('Error reading ZIP file. Please ensure it\'s a valid ZIP export.');
+    }
+}
 
 document.getElementById('hamburger-btn').addEventListener('click', () => {
     const menu = document.getElementById('menu');
