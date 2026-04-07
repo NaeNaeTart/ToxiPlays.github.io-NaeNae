@@ -1,0 +1,597 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: #f4f4f4;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+h1 {
+    margin: 0;
+}
+
+.hamburger-btn {
+    font-size: 24px;
+    padding: 5px 15px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.hamburger-btn:hover {
+    background-color: #0056b3;
+}
+
+.menu {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 250px;
+    height: 100vh;
+    background-color: #ffffff;
+    box-shadow: -2px 0 5px rgba(0,0,0,0.2);
+    z-index: 1000;
+    transform: translateX(100%);
+    transition: transform 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    padding-top: 20px;
+}
+
+.menu.open {
+    transform: translateX(0);
+}
+
+.menu.hidden {
+    display: none;
+}
+
+.menu .close-menu {
+    align-self: flex-end;
+    margin-right: 15px;
+    margin-top: 0;
+    padding: 5px 10px;
+    background: none;
+    color: #333;
+    font-size: 20px;
+}
+
+.menu button {
+    margin: 10px 15px;
+    padding: 10px 15px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    text-align: left;
+    font-size: 16px;
+}
+
+.menu button:hover {
+    background-color: #0056b3;
+}
+
+button {
+    padding: 10px 15px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+.hidden {
+    display: none;
+}
+
+#albums-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 20px;
+}
+
+.album-card {
+    background: white;
+    padding: 15px;
+    border-radius: 5px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    cursor: pointer;
+    position: relative;
+    transition: transform 0.2s ease;
+}
+
+.album-card:hover {
+    transform: translateY(-5px);
+}
+
+.album-card .delete-album-btn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    padding: 2px 5px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.album-card img {
+    width: 100%;
+    height: 150px;
+    object-fit: cover;
+    border-radius: 5px;
+}
+
+.album-card h3 {
+    margin: 10px 0 5px 0;
+}
+
+.album-card p {
+    margin: 0;
+    color: #666;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.4);
+    transition: opacity 0.3s ease;
+}
+
+.modal.show {
+    display: block;
+    opacity: 1;
+    animation: fadeIn 0.3s ease;
+}
+
+.modal.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 5% auto;
+    padding: 20px;
+    border: 1px solid #888;
+    width: 80%;
+    max-width: 600px;
+    border-radius: 5px;
+    transition: all 0.3s ease;
+    animation: floatUp 0.3s ease;
+}
+
+@keyframes floatUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.modal.show .modal-content {
+    transform: scale(1);
+}
+
+.modal.hidden .modal-content {
+    transform: scale(0.9);
+}
+
+.close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close:hover {
+    color: black;
+}
+
+#modal-cover-art {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+#modal-cover-img {
+    width: 200px;
+    height: 200px;
+    object-fit: cover;
+    border: 1px solid #ddd;
+    cursor: pointer;
+}
+
+#modal-tracks-container {
+    margin-bottom: 20px;
+}
+
+.track-item {
+    display: flex;
+    align-items: center;
+    padding: 10px;
+    border: 1px solid #ddd;
+    margin-bottom: 5px;
+    background: #f9f9f9;
+    cursor: move;
+    transition: background-color 0.2s ease;
+}
+
+.track-item:hover {
+    background-color: #e9e9e9;
+}
+
+.track-item.dragging {
+    opacity: 0.5;
+}
+
+.track-number {
+    width: 30px;
+    font-weight: bold;
+}
+
+.track-details {
+    flex: 1;
+    margin-left: 10px;
+}
+
+.track-name {
+    font-weight: bold;
+}
+
+.track-meta {
+    font-size: 12px;
+    color: #666;
+}
+
+.track-actions {
+    display: flex;
+    gap: 5px;
+}
+
+.track-actions button {
+    padding: 5px 10px;
+    font-size: 12px;
+}
+
+#track-form {
+    display: flex;
+    flex-direction: column;
+}
+
+#track-form label {
+    margin-top: 10px;
+}
+
+.explicit-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-weight: normal;
+    cursor: pointer;
+}
+
+.explicit-label input {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.explicit-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2% 4px;
+    background: rgba(150, 151, 151, 0.12);
+    color: #7e7e7e;
+    font-size: 12px;
+    font-weight: bold;
+    line-height: 1;
+    border-radius: 3px;
+}
+
+#track-form input,
+#track-form textarea {
+    padding: 5px;
+    margin-bottom: 10px;
+}
+
+.track-item.missing-track {
+    background: #f1f1f1;
+    color: #999;
+    border-color: #ccc;
+    cursor: default;
+}
+
+.track-item.missing-track:hover {
+    background: #ececec;
+}
+
+.track-item.missing-track .track-name {
+    color: #777;
+}
+
+.track-item.missing-track .track-actions button:not(.restore-btn) {
+    display: none;
+}
+
+.track-item.missing-track .track-actions:hover > button:not(.restore-btn) {
+    display: block;
+}
+
+.track-item.missing-track .track-actions {
+    gap: 5px;
+}
+
+.track-item.missing-track .restore-btn {
+    background: #28a745;
+    color: white;
+}
+
+#audio-player {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    padding: 10px;
+    border-top: 1px solid #ddd;
+    box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+    transition: transform 0.3s ease;
+    z-index: 500;
+}
+
+.minimize-btn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: rgb(165, 165, 165);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    z-index: 10;
+    opacity: 70%;
+    transition: 0.3s;
+}
+
+.minimize-btn :hover {
+    opacity: 100%;
+}
+
+#audio-player.minimized #waveform,
+#audio-player.minimized #synced-lyrics,
+#audio-player.minimized #player-controls,
+#audio-player.minimized #player-bottom {
+    display: none;
+}
+
+#audio-player.minimized {
+    height: 40px;
+    padding: 5px;
+}
+
+#audio-player.minimized .minimize-btn::before {
+    content: '+';
+    position: absolute;
+    left: 35%;
+    top: 22%;
+}
+
+#audio-player:not(.minimized) .minimize-btn::before {
+    content: '-';
+    position: absolute;
+    left: 43%;
+    top: 15%;
+}
+
+#audio-player.hidden {
+    transform: translateY(100%);
+}
+
+#audio-player:not(.hidden) {
+    transform: translateY(0);
+}
+
+#synced-lyrics {
+    margin: 10px 0;
+    padding: 15px;
+    background: #f5f5f5;
+    border-radius: 5px;
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#synced-lyrics.hidden {
+    display: none;
+}
+
+#synced-lyrics p {
+    margin: 0;
+    font-size: 120%;
+    line-height: 1.5;
+    text-align: center;
+    font-weight: 700;
+}
+
+#synced-lyrics span {
+    position: relative;
+    background: linear-gradient(90deg, #007bff 0%, #007bff 0%, #333 0%);
+    background-size: 100% 100%;
+    background-position: 0% 0%;
+    -webkit-background-clip: text;
+    background-clip: text;
+}
+
+#player-time {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    gap: 10px;
+    margin: 10px 0;
+    font-size: 12px;
+}
+
+.volume-slider {
+    flex: 0 0 150px;
+    height: 5px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #ddd;
+    border-radius: 5px;
+    outline: none;
+}
+
+.volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 15px;
+    height: 15px;
+    background: #007bff;
+    cursor: pointer;
+    border-radius: 50%;
+}
+
+.volume-slider::-moz-range-thumb {
+    width: 15px;
+    height: 15px;
+    background: #007bff;
+    cursor: pointer;
+    border-radius: 50%;
+    border: none;
+}
+
+#player-bottom {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+#custom-tags-list div {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 5px;
+}
+
+#track-tags .tag-options {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 5px;
+}
+
+#track-tags label {
+    font-size: 12px;
+}
+
+#waveform {
+    height: 80px;
+    background: #f0f0f0;
+}
+
+#player-controls {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin: 10px 0;
+}
+
+.track-tags {
+    margin-top: 5px;
+}
+
+.tag {
+    display: inline-block;
+    padding: 2px 5px;
+    margin: 2px;
+    border-radius: 3px;
+    font-size: 10px;
+    color: white;
+    background: brown;
+}
+
+.tag.final-master, .tag.final-mix { background: green; }
+.tag.clearance-required, .tag.mastering-required, .tag.mixing-required { background: red; }
+.tag.demo-version, .tag.reference-track, .tag.instrumental, .tag.vocals-only, .tag.performance-track, .tag.radio-edit { background: blue; }
+.tag.unfinished, .tag.open-verse { background: gray; }
+
+button.active {
+    background-color: #3a99ff;
+    color: white;
+}
+
+#niche-mode-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 15px;
+    cursor: pointer;
+    font-weight: normal;
+}
+
+#niche-mode-label input {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+#niche-mode-fields {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #ddd;
+}
+
+#niche-mode-fields.hidden {
+    display: none;
+}
+
+#current-track-info {
+    text-align: center;
+}
+
+.empty-album {
+    position: static;
+    margin: 18% auto;
+    text-align: center;
+    font-style: italic;
+}
