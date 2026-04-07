@@ -431,6 +431,20 @@ button:hover {
     transform: translateY(0);
 }
 
+.mass-import-btn {
+    background-color: #28a745;
+    margin: 10px 0;
+    width: 100%;
+}
+
+.mass-import-btn:hover {
+    background-color: #218838;
+}
+
+.mass-import-btn.hidden {
+    display: none;
+}
+
 #synced-lyrics {
     margin: 10px 0;
     padding: 15px;
