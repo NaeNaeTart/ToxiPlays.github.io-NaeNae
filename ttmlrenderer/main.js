@@ -30,7 +30,7 @@ let _audioBaseName = '';   // filename without extension
 let _audioExt      = '';   // extension in original case
 
 // ─── App version ──────────────────────────────────────────────────────────────
-const APP_VERSION = '5.0.0';
+const APP_VERSION = '5.0.1';
 
 // ─── Filename resolver ────────────────────────────────────────────────────────
 const FILENAME_KEY     = 'ttml-renderer-filename';
@@ -1851,8 +1851,8 @@ async function startAmlRender() {
   const q = getExportQualityProfile();
   const W = q.width, H = q.height, FPS = q.fps;
   const VIDEO_BPS = q.videoBitsPerSecond;
-  const FONT_SIZE       = 40;
-  const ADLIB_FONT_SIZE = 30;
+  const FONT_SIZE       = 50;
+  const ADLIB_FONT_SIZE = 40;
   const ROW_GAP         = 18;
   const BLOCK_GAP       = 30;
   const GAP_HEIGHT      = 38;
