@@ -1851,8 +1851,8 @@ async function startAmlRender() {
   const q = getExportQualityProfile();
   const W = q.width, H = q.height, FPS = q.fps;
   const VIDEO_BPS = q.videoBitsPerSecond;
-  const FONT_SIZE       = 50;
-  const ADLIB_FONT_SIZE = 40;
+  const FONT_SIZE       = 45;
+  const ADLIB_FONT_SIZE = 35;
   const ROW_GAP         = 18;
   const BLOCK_GAP       = 30;
   const GAP_HEIGHT      = 38;
