@@ -176,6 +176,7 @@ async function loadTTMLFromContent(xmlText) {
   status.textContent = "Loading TTML...";
   status.classList.remove("error");
   loadBtn.disabled = true;
+  annotations = [];
 
   try {
     const xmlDoc = new DOMParser().parseFromString(xmlText, "application/xml");
