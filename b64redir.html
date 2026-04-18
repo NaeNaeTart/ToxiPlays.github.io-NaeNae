@@ -3,7 +3,7 @@
   if (i) {
     let h = atob(i);
     let url = new URL(h);
-    let prm = new URLSearchPararms(url.search);
+    let prm = new URLSearchParams(url.search);
     prm.append("source","toxiplays-b64");
     let fin = `${url.toString()}?${prm.toString()}`;
     document.location.replace(fin);
