@@ -376,42 +376,9 @@
     color: var(--text-bright);
   }
 
-  @keyframes word-jitter {
-    0%   { transform: translateY(2px); }
-    40%  { transform: translateY(5px); }
-    100% { transform: translateY(5px); }
-  }
-
-  @keyframes float-up {
-    from { transform: translateY(5px); }
-    to   { transform: translateY(0px); }
-  }
-
-  .lyric-span.active {
-    color: var(--active-word);
-    text-shadow: 0 0 20px rgba(232,244,64,0.4);
-    animation:
-      word-jitter 60ms linear forwards,
-      float-up var(--word-dur, 0.3s) cubic-bezier(0.22, 1, 0.36, 1) forwards 60ms;
-  }
-
   .lyric-span.past {
     color: var(--text-bright);
     transform: translateY(0px);
-  }
-
-  /* Long-held word glow animation */
-  @keyframes word-glow {
-    0%   { text-shadow: 0 0 10px rgba(232,244,64,0.5); }
-    50%  { text-shadow: 0 0 60px rgba(232,244,64,0.9), 0 0 120px rgba(232,244,64,0.4); }
-    100% { text-shadow: 0 0 10px rgba(232,244,64,0.5); }
-  }
-
-  .lyric-span.active.long-word {
-    animation:
-      word-jitter 60ms linear forwards,
-      float-up var(--word-dur, 0.3s) cubic-bezier(0.22, 1, 0.36, 1) forwards 60ms,
-      word-glow 0.8s ease-in-out infinite 60ms;
   }
 
   /* Word group: wraps multi-syllable spans to prevent mid-word line breaks */

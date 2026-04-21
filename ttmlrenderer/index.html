@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-<!-- bro's the snooper -->
 <html lang="en">
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
@@ -12,8 +11,10 @@
 <meta name="language" content="English">
 <meta name="author" content="toxi">
 <link rel="stylesheet" href="style.css">
-<link rel="stylesheet" href="dynamic-glow.css">
+<link rel="stylesheet" href="lyrics.css">
+<link rel="stylesheet" href="overlap.css">
 <script src="main.js" defer></script>
+<script src="fix-webm-duration.js"></script>
 <title>TTML Renderer</title>
 </head>
 <body>
@@ -27,6 +28,7 @@
       <div class="entry"><a href="https://spicylyrics.org/toxi" target="_blank" rel="noopener noreferrer">@toxi</a> — base code</div>
       <div class="entry"><a href="https://genius.com/gooncave" target="_blank" rel="noopener noreferrer">alex</a> — color-changing code</div>
       <div class="entry"><a href="https://quuut.codes" target="_blank" rel="noopener noreferrer">quuut</a> — WebKit file upload fix</div>
+      <div class="entry"><a href="https://github.com/yusitnikov" target="_blank" rel="noopener noreferrer">Yuri Sitnikov</a> — <a href="https://github.com/yusitnikov/fix-webm-duration" target="_blank" rel="noopener noreferrer">fix-webm-duration</a> library</div>
       <div class="entry muted">Special thanks to <a href="https://github.com/Steve-xmh" target="_blank" rel="noopener noreferrer">SteveXMH</a> for the <a href="https://amll-ttml-tool.stevexmh.net/" target="_blank" rel="noopener noreferrer">AMLL TTML tool</a></div>
     </div>
   </div>
@@ -101,19 +103,6 @@
   <div class="render-bar-track" id="render-bar-track"><div class="render-bar-fill" id="render-bar-fill"></div></div>
   <button class="render-cancel" id="render-cancel">Cancel</button>
 </div>
-
-<style>
-  @keyframes overlap-fade-in {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  #overlap-warning-overlay.visible {
-    display: flex !important;
-    animation: overlap-fade-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-  }
-  #overlap-cancel-btn:hover  { border-color: var(--text-bright) !important; color: var(--text-bright) !important; }
-  #overlap-confirm-btn:hover { opacity: 0.85; }
-</style>
 
 <div id="overlap-warning-overlay" style="
   display:none;position:fixed;inset:0;background:rgba(10,10,15,0.92);

@@ -1,4 +1,3 @@
-
 // ─── Render preview thumbnail ─────────────────────────────────────────────────
 // Shared by both export modes. Call updateRenderPreview(sourceCanvas) after
 // each frame draw; it scales the frame down to the 320×180 overlay thumbnail.
@@ -30,7 +29,7 @@ let _audioBaseName = '';   // filename without extension
 let _audioExt      = '';   // extension in original case
 
 // ─── App version ──────────────────────────────────────────────────────────────
-const APP_VERSION = '5.0.1';
+const APP_VERSION = '5.1.0';
 
 // ─── Filename resolver ────────────────────────────────────────────────────────
 const FILENAME_KEY     = 'ttml-renderer-filename';
@@ -57,6 +56,8 @@ const EXPORT_QUALITY_PROFILES = {
     videoBitsPerSecond: 3_200_000,
   },
 };
+
+var startTime = null;
 
 function getExportQualityProfile() {
   const sel = document.getElementById('export-quality');
@@ -407,11 +408,11 @@ function parseTTML(xmlString) {
     }
   });
 
-  // Compute long-word threshold: median word duration * 3
+  // Compute long-word threshold: median word duration * 4.5
   if (spans.length > 0) {
     const durations = spans.map(s => s.duration).sort((a, b) => a - b);
     const median = durations[Math.floor(durations.length / 2)];
-    const threshold = median * 3;
+    const threshold = median * 4.5;
     spans.forEach(s => { s.isLong = s.duration >= threshold; });
   }
 
@@ -487,6 +488,10 @@ function seekToTime(t) {
   // Reset highlights
   spans.forEach(s => {
     s.el.classList.remove('active', 'long-word');
+    // Restore plain text if it was letter-split
+    if (s.el.querySelector('.lyric-letter')) {
+      s.el.textContent = s.el.textContent;
+    }
     if (s.end <= pausedAt) s.el.classList.add('past');
     else s.el.classList.remove('past');
   });
@@ -508,18 +513,36 @@ function syncLoop() {
 
   // Spans that just became inactive → mark past
   for (const i of activeSpanSet) {
-    if (!newActiveSpans.has(i)) {
-      spans[i].el.classList.remove('active', 'long-word');
-      if (t >= spans[i].end) spans[i].el.classList.add('past');
+  if (!newActiveSpans.has(i)) {
+    spans[i].el.classList.remove('active', 'long-word');
+    if (t >= spans[i].end) {
+      spans[i].el.classList.add('past');
+      // Restore plain text if it was letter-split
+      if (spans[i].el.querySelector('.lyric-letter')) {
+        spans[i].el.textContent = spans[i].el.textContent;
+      }
     }
   }
+}
   // Spans that just became active
   for (const i of newActiveSpans) {
     if (!activeSpanSet.has(i)) {
       const s = spans[i];
       s.el.classList.add('active');
       s.el.classList.remove('past');
-      if (s.isLong) s.el.classList.add('long-word');
+      if (s.isLong) {
+        s.el.classList.add('long-word');
+        // Split into letters for bloom stagger
+        const text = s.el.textContent;
+        s.el.innerHTML = '';
+        [...text].forEach((char, idx) => {
+          const letterEl = document.createElement('span');
+          letterEl.className = 'lyric-letter';
+          letterEl.textContent = char;
+          letterEl.style.setProperty('--letter-index', idx);
+          s.el.appendChild(letterEl);
+        });
+      }
       // Retroactively mark all earlier spans on the same line as past.
       // This corrects skipped frames (tab unfocus, freeze) where spans were
       // never individually activated and would otherwise stay greyed out.
@@ -1154,6 +1177,8 @@ async function startRender() {
 
   recorder.start(100);
   audioSource.start(0);
+  startTime = Date.now();
+  document.querySelector(".render-title").textContent = "Rendering";
   const audioStartTime = renderACtx.currentTime;
 
   let currentViewOffsetY = layout.length > 0 ? (layout[0].y + layout[0].totalH / 2 - CENTER_Y) : 0;
@@ -1192,14 +1217,19 @@ async function startRender() {
     _stableRecorder = null;
     _stableAudioCtx = null;
     renderInProgress = false;
-    overlay.classList.remove('active');
-    document.getElementById('btn-render').classList.remove('rendering');
     if (!renderCancelled) {
-      const blob = new Blob(chunks, { type: mimeType });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href = url; a.download = resolveFilename('scroll'); a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      let duration = Date.now() - startTime;
+      const initBlob = new Blob(chunks, { type: mimeType });
+      document.querySelector(".render-title").textContent = "Patching";
+      ysFixWebmDuration(initBlob, duration, blob => {
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url; a.download = resolveFilename('scroll'); a.click();
+        overlay.classList.remove('active');
+        document.getElementById('btn-render').classList.remove('rendering');
+        startTime = null;
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      });
     }
   };
 }
@@ -1785,6 +1815,8 @@ async function startKaraokeRender() {
 
   recorder.start(100);
   audioSrc.start(0);
+  startTime = Date.now();
+  document.querySelector(".render-title").textContent = "Rendering";
   const audioStartTime = renderACtx.currentTime;
 
   let renderDone    = false;
@@ -1824,14 +1856,19 @@ async function startKaraokeRender() {
     _stableRecorder = null;
     _stableAudioCtx = null;
     renderInProgress = false;
-    overlay.classList.remove('active');
-    document.getElementById('btn-render').classList.remove('rendering');
     if (!renderCancelled) {
-      const blob = new Blob(chunks, { type: mimeType });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href = url; a.download = resolveFilename('karaoke'); a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      let duration = Date.now() - startTime;
+      const initBlob = new Blob(chunks, { type: mimeType });
+      document.querySelector(".render-title").textContent = "Patching";
+      ysFixWebmDuration(initBlob, duration, blob => {   
+        overlay.classList.remove('active');
+        document.getElementById('btn-render').classList.remove('rendering');
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url; a.download = resolveFilename('karaoke'); a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+        startTime = null;
+      });
     }
   };
 }
@@ -1864,7 +1901,7 @@ async function startAmlRender() {
   const ADLIB_OFFSET    = 18;
   const ADLIB_FADE_DUR  = 0.20;
   const ADLIB_MARGIN    = 20;
-  const JITTER_DUR      = 0.060;
+  const JITTER_DUR      = 0.060 * 0;
   const CREDIT_FONT_SIZE = 25;
   const CREDIT_LINE_GAP  = 6;
   const CREDIT_SCROLL_DUR = 1.2;
@@ -1894,13 +1931,10 @@ async function startAmlRender() {
   }
 
   function getSpanYOffset(span, t) {
-    if (t < span.begin) return 2;
+    if (t < span.begin) return 4;
     if (t >= span.end) return 0;
-    const elapsed = t - span.begin;
-    const wordDur = span.end - span.begin;
-    if (elapsed < JITTER_DUR) return 2 + 3 * (elapsed / JITTER_DUR);
-    const p = Math.min((elapsed - JITTER_DUR) / Math.max(wordDur - JITTER_DUR, 0.001), 1);
-    return 5 * (1 - easeOut(p));
+    const p = (t - span.begin) / Math.max(span.end - span.begin, 0.001);
+    return 4 * (1 - easeOut(Math.min(p, 1)));
   }
 
   function collectLineSegments(lineEl, lineSpans) {
@@ -1956,6 +1990,16 @@ async function startAmlRender() {
         runWidth += metric.width;
         i++;
         if (/\s$/.test(segments[i - 1].text)) break;
+      }
+      const wordBegin = run[0].span?.begin ?? 0;
+      const wordEnd   = run[run.length - 1].span?.end ?? wordBegin;
+      let wordOffsetX = 0;
+      for (const seg of run) {
+        seg.wordOffsetX = wordOffsetX;
+        seg.wordW       = runWidth;
+        seg.wordBegin   = wordBegin;
+        seg.wordEnd     = wordEnd;
+        wordOffsetX += seg.width;
       }
       units.push({ segs: run, width: runWidth, isSpace: false });
     }
@@ -2047,11 +2091,17 @@ async function startAmlRender() {
 
     const nextEntry = amlEntries[i + 1];
     if (!nextEntry) continue;
-    const gapDur = nextEntry.begin - entry.end;
+
+    const effectiveEnd = (entry.adlib && entry.adlib.end > entry.end)
+      ? entry.adlib.end
+      : entry.end;
+    
+    const gapDur = nextEntry.begin - effectiveEnd;
+
     if (gapDur >= GAP_THRESHOLD) {
       const gapItem = {
         type: 'gap',
-        start: entry.end,
+        start: effectiveEnd,
         end: nextEntry.begin,
         top: currentY,
         totalH: GAP_HEIGHT,
@@ -2144,11 +2194,19 @@ async function startAmlRender() {
   for (let i = 0; i < amlEntries.length; i++) {
     amlEntries[i].focusStart = getEntryFocusStartByIndex(i);
   }
+  
+  for (let i = 0; i < amlEntries.length; i++) {
+    const nextEntry = amlEntries[i + 1];
+    amlEntries[i].focusEnd = nextEntry ? nextEntry.focusStart : Number.POSITIVE_INFINITY;
+  }
 
   function getAdlibReveal(entry, t) {
     if (!entry?.adlib) return 0;
-    const revealStart = entry.focusStart ?? entry.begin;
-    const hideStart = entry.adlib.end;
+    const earlyReveal = entry.adlib.begin - 0.5;
+    const revealStart = Math.min(entry.focusStart ?? entry.begin, earlyReveal);
+    const hideStart = entry.adlib.end <= entry.end
+      ? (entry.focusEnd ?? entry.adlib.end)
+      : entry.adlib.end;
     const hideEnd = hideStart + ADLIB_FADE_DUR;
     if (t < revealStart || t >= hideEnd) return 0;
 
@@ -2190,7 +2248,6 @@ async function startAmlRender() {
     }
     for (const gapItem of gapItems) {
       if (gapItem.top >= baseTop) break;
-      // Layout is authored with full gap space present; collapse it unless active.
       const reveal = getGapSpaceReveal(gapItem, t);
       shift += getGapSlotHeight(gapItem) * (reveal - 1);
     }
@@ -2249,20 +2306,22 @@ async function startAmlRender() {
       if (t >= entry.begin && t < entry.end) return getDynamicCenter(entry, t) - FOCUS_Y;
       if (!nextEntry) continue;
 
-      const gapDur = nextEntry.begin - entry.end;
-      if (t >= entry.end && t < nextEntry.begin && gapDur >= GAP_THRESHOLD && entry.gapAfter) {
+      const effectiveEnd = (entry.adlib && entry.adlib.end > entry.end)
+        ? entry.adlib.end
+        : entry.end;
+      const gapDur = nextEntry.begin - effectiveEnd;
+      if (t >= effectiveEnd && t < nextEntry.begin && gapDur >= GAP_THRESHOLD && entry.gapAfter) {
         const gapItem = entry.gapAfter;
         const toGapDur = Math.min(0.6, Math.max(0.2, gapDur * 0.2));
-        if (t >= entry.end && t < entry.end + toGapDur) {
-          const p = easeInOut((t - entry.end) / toGapDur);
+        if (t >= effectiveEnd && t < effectiveEnd + toGapDur) {
+          const p = easeInOut((t - effectiveEnd) / toGapDur);
           return lerp(getDynamicCenter(entry, t), getDynamicCenter(gapItem, t), p) - FOCUS_Y;
         }
-
         // Stay centered on the break position until the break ends.
         return getDynamicCenter(gapItem, t) - FOCUS_Y;
       } else if (t >= entry.end && t < nextEntry.begin) {
-        const scrollDur = Math.min(2, Math.max(0.5, nextEntry.begin - entry.end));
-        const scrollStart = Math.max(entry.end, nextEntry.begin - scrollDur);
+        const scrollDur = Math.min(2, Math.max(0.5, nextEntry.begin - effectiveEnd));
+        const scrollStart = Math.max(effectiveEnd, nextEntry.begin - scrollDur);
         if (t < scrollStart) {
           return getDynamicCenter(entry, t) - FOCUS_Y;
         }
@@ -2339,41 +2398,130 @@ async function startAmlRender() {
     ctx.globalAlpha = 1;
   }
 
-  function drawSegmentText(text, x, y, progress, baseColor, alpha, shouldGlow, metric) {
+  function drawSegmentText(text, x, y, progress, baseColor, alpha, shouldGlow, metric, wordX, wordW, wordProgress) {
+    if (wordX == null) wordX = x;
+    if (wordW == null) wordW = metric.width;
+    if (wordProgress == null) wordProgress = progress;
+
     const textW = metric.width;
     const clipH = metric.ascent + metric.descent + 28;
     const clipY = y - metric.ascent - 14;
 
-    if (progress <= 0) {
+    const FEATHER      = Math.max(wordW * 0.25, 18);
+    const sweepFrontX  = wordX + wordProgress * wordW;
+    const sweptIntoSeg = sweepFrontX - x;
+
+    // word glow
+    if (shouldGlow && progress > 0 && progress < 1) {
+      const glowT = progress;
+      let glowIntensity;
+      if (glowT < 0.15) {
+        glowIntensity = glowT / 0.15;
+      } else {
+        glowIntensity = 1 - ((glowT - 0.15) / 0.85);
+      }
+      glowIntensity = Math.max(0, glowIntensity);
+
+      const innerBlur  = 10 + 2  * glowIntensity;
+      const innerAlpha = 0.5 + 0.4 * glowIntensity;
+      const outerBlur  = 30 * glowIntensity;
+      const outerAlpha = 0.4 * glowIntensity;
+
+      metric._glowInnerBlur  = innerBlur;
+      metric._glowInnerAlpha = innerAlpha;
+      metric._glowOuterBlur  = outerBlur;
+      metric._glowOuterAlpha = outerAlpha;
+    }
+
+    // letter bloom
+    if (shouldGlow && progress > 0 && progress < 1) {
+      const spanDur = metric._spanDur || 0.6;
+      const letters = [...text];
+      const STAGGER_MS  = 90;
+      const BLOOM_DUR   = spanDur * 2;
+      const BASE_DELAY  = 0.060;       // 60ms
+
+      let letterX = x;
+      for (let i = 0; i < letters.length; i++) {
+        const char   = letters[i];
+        const charW  = ctx.measureText(char).width;
+
+        const letterDelay = BASE_DELAY + (i * STAGGER_MS / 1000);
+        const spanProgress = progress;
+        const spanElapsed = spanProgress * spanDur;
+        const letterT = Math.max(0, Math.min(spanElapsed - letterDelay, BLOOM_DUR)) / BLOOM_DUR;
+
+        // letter-bloom keyframes:
+        // 0%→ scale(0.88), 18%→ scale(1.03) translateY(-3px),
+        // 55%→ scale(0.99) translateY(-1px), 100%→ scale(0.97) translateY(0)
+        let scale, ty;
+        if (letterT <= 0) {
+          scale = 1; ty = 0;
+        } else if (letterT < 0.18) {
+          const p = letterT / 0.18;
+          scale = 1 + (1.1 - 0.95) * p;
+          ty    = -3 * p;
+        } else if (letterT < 0.55) {
+          const p = (letterT - 0.18) / (0.55 - 0.18);
+          scale = 1.1 + (0.95 - 1.1) * p;
+          ty    = -3 + (2 * p);
+        } else {
+          const p = (letterT - 0.55) / (1 - 0.55);
+          scale = 1.1 + (1 - 1.1) * p;
+          ty    = -1 + p;
+        }
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        const baselineX = letterX + charW / 2;
+        ctx.translate(baselineX, y + ty);
+        ctx.scale(scale, scale);
+
+        ctx.fillStyle = baseColor;
+        ctx.shadowBlur = 0;
+        ctx.fillText(char, -charW / 2, 0);
+
+        const gradX1_local = (sweepFrontX  - baselineX) / scale;
+        const gradX0_local = (sweepFrontX - FEATHER - baselineX) / scale;
+        if (sweepFrontX > letterX) {
+          ctx.save();
+          const localGrad = ctx.createLinearGradient(gradX0_local, 0, gradX1_local, 0);
+          localGrad.addColorStop(0, COL_BRIGHT);
+          localGrad.addColorStop(0.95, hexToRGBA(COL_BRIGHT, 0));
+          ctx.fillStyle = localGrad;
+          if (metric._glowInnerBlur) {
+            ctx.shadowColor = hexToRGBA(COL_BRIGHT, metric._glowInnerAlpha);
+            ctx.shadowBlur  = metric._glowInnerBlur / scale;
+          }
+          ctx.fillText(char, -charW / 2, 0);
+          if (metric._glowOuterBlur > 0.5) {
+            ctx.shadowBlur  = metric._glowOuterBlur / scale;
+            ctx.shadowColor = hexToRGBA(COL_BRIGHT, metric._glowOuterAlpha);
+            ctx.globalAlpha = alpha * (metric._glowOuterAlpha / 0.4);
+            ctx.fillText(char, -charW / 2, 0);
+          }
+          ctx.restore();
+        }
+
+        ctx.restore();
+
+        letterX += charW;
+      }
+      return; // letter loop handled drawing, skip the standard drawSegmentText path below
+    }
+
+    if (wordProgress <= 0) {
       ctx.globalAlpha = alpha;
       ctx.fillStyle = baseColor;
       ctx.shadowBlur = 0;
       ctx.fillText(text, x, y);
-      if (shouldGlow) {
-        ctx.save();
-        ctx.globalAlpha = alpha * 0.5;
-        ctx.shadowColor = COL_BRIGHT;
-        ctx.shadowBlur = 24;
-        ctx.fillStyle = 'rgba(0,0,0,0)';
-        ctx.fillText(text, x, y);
-        ctx.restore();
-      }
       return;
     }
 
-    if (progress >= 1) {
+    if (wordProgress >= 1) {
       ctx.globalAlpha = alpha;
       ctx.fillStyle = COL_BRIGHT;
       ctx.fillText(text, x, y);
-      if (shouldGlow) {
-        ctx.save();
-        ctx.globalAlpha = alpha * 0.5;
-        ctx.shadowColor = COL_BRIGHT;
-        ctx.shadowBlur = 24;
-        ctx.fillStyle = 'rgba(0,0,0,0)';
-        ctx.fillText(text, x, y);
-        ctx.restore();
-      }
       ctx.shadowBlur = 0;
       return;
     }
@@ -2383,25 +2531,16 @@ async function startAmlRender() {
     ctx.shadowBlur = 0;
     ctx.fillText(text, x, y);
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(x, clipY, Math.min(textW, progress * textW), clipH);
-    ctx.clip();
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = COL_BRIGHT;
-    ctx.shadowBlur = 0;
-    ctx.fillText(text, x, y);
-    ctx.restore();
-    if (shouldGlow) {
-      ctx.save();
-      ctx.globalAlpha = alpha * 0.5;
-      ctx.shadowColor = COL_BRIGHT;
-      ctx.shadowBlur = 24;
-      ctx.fillStyle = 'rgba(0,0,0,0)';
+    if (sweptIntoSeg > 0) {
+      const sweepGrad = ctx.createLinearGradient(sweepFrontX - FEATHER, 0, sweepFrontX, 0);
+      sweepGrad.addColorStop(0, COL_BRIGHT);
+      sweepGrad.addColorStop(0.8, hexToRGBA(COL_BRIGHT, 0));
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = sweepGrad;
+      ctx.shadowBlur = 0;
       ctx.fillText(text, x, y);
-      ctx.restore();
+      ctx.shadowBlur = 0;
     }
-    ctx.shadowBlur = 0;
   }
 
   function drawLine(entry, t, offsetY, isAdlibRender, alphaMultiplier = 1, forcedTop = null) {
@@ -2452,7 +2591,16 @@ async function startAmlRender() {
         const baseColor = isPast ? COL_BRIGHT : (isActive ? COL_MID : COL_DIM);
         const yOffset = getSpanYOffset(span, t);
         const shouldGlow = !isAdlibRender && activeSpan === span && span.isLong;
-        drawSegmentText(seg.text, xCursor, rowTop + entry.fontSize + yOffset, progress, baseColor, alpha, shouldGlow, seg.metric || textCache.metrics(entry.fontSize, seg.text));
+        const segMetric = seg.metric || textCache.metrics(entry.fontSize, seg.text);
+        segMetric._spanDur = span.end - span.begin; // attach duration for letter-bloom
+
+        const wordX = (seg.wordOffsetX != null) ? (xCursor - seg.wordOffsetX) : xCursor;
+        const wordW = seg.wordW ?? seg.width;
+        
+        const wBegin = seg.wordBegin ?? span.begin;
+        const wEnd   = seg.wordEnd   ?? span.end;
+        const wordProgress = t < wBegin ? 0 : t >= wEnd ? 1 : (t - wBegin) / Math.max(wEnd - wBegin, 0.001);
+        drawSegmentText(seg.text, xCursor, rowTop + entry.fontSize + yOffset, progress, baseColor, alpha, shouldGlow, segMetric, wordX, wordW, wordProgress);
         xCursor += seg.width;
       }
       rowTop += entry.rowAdvance;
@@ -2489,18 +2637,6 @@ async function startAmlRender() {
       if (mainEntry.adlib) drawAdlib(mainEntry.adlib, mainEntry, t, offsetY);
     }
 
-    const topFade = ctx.createLinearGradient(0, 0, 0, 120);
-    topFade.addColorStop(0, BG);
-    topFade.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = topFade;
-    ctx.fillRect(0, 0, W, 120);
-
-    const bottomFade = ctx.createLinearGradient(0, H - 180, 0, H);
-    bottomFade.addColorStop(0, 'rgba(0,0,0,0)');
-    bottomFade.addColorStop(1, BG);
-    ctx.fillStyle = bottomFade;
-    ctx.fillRect(0, H - 180, W, 180);
-
   }
 
   clearRenderPreview();
@@ -2522,6 +2658,8 @@ async function startAmlRender() {
 
   recorder.start(100);
   audioSrc.start(0);
+  startTime = Date.now();
+  document.querySelector(".render-title").textContent = "Rendering";
   const audioStartTime = renderACtx.currentTime;
 
   let amlRafId = null;
@@ -2560,16 +2698,21 @@ async function startAmlRender() {
     _stableRecorder = null;
     _stableAudioCtx = null;
     renderInProgress = false;
-    overlay.classList.remove('active');
-    document.getElementById('btn-render').classList.remove('rendering');
     if (!renderCancelled) {
-      const blob = new Blob(chunks, { type: mimeType });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href = url;
-      a.download = resolveFilename('aml');
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      let duration = Date.now() - startTime;
+      const initBlob = new Blob(chunks, { type: mimeType });
+      document.querySelector(".render-title").textContent = "Patching";
+      ysFixWebmDuration(initBlob, duration, blob => {
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url;
+        a.download = resolveFilename('aml');
+        a.click();
+        overlay.classList.remove('active');
+        document.getElementById('btn-render').classList.remove('rendering');
+        startTime = null;
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      });
     }
   };
 }
@@ -3162,6 +3305,8 @@ async function startInYourFaceRender() {
 
   recorder.start(100);
   audioSrc.start(0);
+  startTime = Date.now();
+  document.querySelector(".render-title").textContent = "Rendering";
   const audioStartTime = renderACtx.currentTime;
 
   let renderDone   = false;
@@ -3201,14 +3346,19 @@ async function startInYourFaceRender() {
     _stableRecorder = null;
     _stableAudioCtx = null;
     renderInProgress = false;
-    overlay.classList.remove('active');
-    document.getElementById('btn-render').classList.remove('rendering');
     if (!renderCancelled) {
-      const blob = new Blob(chunks, { type: mimeType });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href = url; a.download = resolveFilename('iyf'); a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      document.querySelector('.render-title').textContent = "Patching";
+      let duration = Date.now() - startTime;
+      const initBlob = new Blob(chunks, { type: mimeType });
+      ysFixWebmDuration(initBlob, duration, blob => {
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url; a.download = resolveFilename('iyf'); a.click();
+        overlay.classList.remove('active');
+        document.getElementById('btn-render').classList.remove('rendering');
+        startTime = null;
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      });
     }
   };
 }

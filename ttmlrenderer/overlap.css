@@ -1,0 +1,10 @@
+@keyframes overlap-fade-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  #overlap-warning-overlay.visible {
+    display: flex !important;
+    animation: overlap-fade-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  #overlap-cancel-btn:hover  { border-color: var(--text-bright) !important; color: var(--text-bright) !important; }
+  #overlap-confirm-btn:hover { opacity: 0.85; }
