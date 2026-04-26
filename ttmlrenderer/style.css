@@ -449,7 +449,7 @@
     transition: border-color 0.15s, color 0.15s;
   }
   .btn-render:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-  .btn-render:disabled { opacity: 0.3; cursor: not-allowed; }
+  .btn-render:disabled { opacity: 0.3; cursor: not-allowed; display: none; }
   .btn-render.rendering { border-color: var(--accent2); color: var(--accent2); animation: pulse 1s infinite; }
 
   /* Render progress overlay */
@@ -757,7 +757,7 @@
     appearance: none;
     margin: 0; 
   }
-  .design-input { -moz-appearance: textfield; }
+  .design-input { -moz-appearance: textfield; appearance: none; }
 
   .design-reset {
     font-family: 'DM Mono', monospace;

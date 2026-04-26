@@ -68,6 +68,7 @@ export function initUI() {
   async function handleAudio(file) {
     console.log('handleAudio', file?.name);
     if (!file) return;
+    document.getElementById('total-time').textContent = '?:??';
     ensureContext();
     state.audioBaseName = file.name.replace(/\.[^/.]+$/, "");
     state.audioExt = file.name.split('.').pop();
