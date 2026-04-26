@@ -151,7 +151,7 @@ export function parseTTML(xmlString) {
       spanEl.dataset.begin = tok.begin;
       spanEl.dataset.end   = tok.end;
       spanEl.dataset.duration = tok.wordDuration;
-      spanEl.textContent = tok.text.trimEnd();
+      spanEl.textContent = /\S/.test(tok.text) ? tok.text.trimEnd() : tok.text;
       spanEl.style.setProperty('--word-dur', tok.wordDuration.toFixed(3) + 's');
       spanEl.addEventListener('click', () => seekToTime(tok.begin));
       state.spans.push({ el: spanEl, begin: tok.begin, end: tok.end, duration: tok.wordDuration, lineEl: null });
@@ -161,13 +161,14 @@ export function parseTTML(xmlString) {
     function appendSpanWithTrail(parent, tok) {
       const el = makeSpanEl(tok);
       parent.appendChild(el);
-      const trail = tok.text.match(/\s+$/);
-      if (trail) parent.appendChild(document.createTextNode(trail[0]));
+      if (/\S/.test(tok.text)) {
+        const trail = tok.text.match(/\s+$/);
+        if (trail) parent.appendChild(document.createTextNode(trail[0]));
+      }
     }
 
     function appendGroupWithTrail(parent, group) {
       const lastTok = group[group.length - 1];
-      const trail = lastTok.text.match(/\s+$/);
       if (group.length === 1) {
         appendSpanWithTrail(parent, group[0]);
       } else {
@@ -175,7 +176,10 @@ export function parseTTML(xmlString) {
         wrapper.className = 'word-group';
         group.forEach(t => wrapper.appendChild(makeSpanEl(t)));
         parent.appendChild(wrapper);
-        if (trail) parent.appendChild(document.createTextNode(trail[0]));
+        if (/\S/.test(lastTok.text)) {
+          const trail = lastTok.text.match(/\s+$/);
+          if (trail) parent.appendChild(document.createTextNode(trail[0]));
+        }
       }
     }
 

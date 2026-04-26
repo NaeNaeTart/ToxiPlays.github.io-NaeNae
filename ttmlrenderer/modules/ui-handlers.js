@@ -1,8 +1,8 @@
 import { state } from './state.js';
 import { 
-  APP_VERSION, FILENAME_KEY, FILENAME_DEFAULT, EXPORT_QUALITY_KEY, RENDER_METHOD_KEY,
+  APP_VERSION, FILENAME_KEY, FILENAME_DEFAULT, EXPORT_QUALITY_KEY, EXPORT_FORMAT_KEY, RENDER_METHOD_KEY,
   CUSTOM_QUALITY_W_KEY, CUSTOM_QUALITY_H_KEY, CUSTOM_QUALITY_FPS_KEY,
-  EXPORT_QUALITY_PROFILES, THEME_KEY, PICKER_MAP, DEFAULTS 
+  EXPORT_QUALITY_PROFILES, THEME_KEY, PICKER_MAP, DEFAULTS, EXPORT_FORMAT_DEFAULT 
 } from './constants.js';
 import { 
   formatTime, resolveFilename, setPlayIcon, syncAppleMusicPreviewClass, hexToRGBA 
@@ -27,6 +27,7 @@ export function initUI() {
   initFnVars();
   initFilename();
   initExportQuality();
+  initExportFormat();
   initRenderMethod();
   initContributors();
   initTheme();
@@ -226,6 +227,7 @@ function initFilename() {
   input.addEventListener('mouseleave', () => { if (preview) preview.style.display = 'none'; });
   input.addEventListener('input', () => { if (preview && preview.style.display !== 'none') updatePreview(); });
   document.getElementById('export-style')?.addEventListener('change', () => { if (preview && preview.style.display !== 'none') updatePreview(); });
+  document.getElementById('export-format')?.addEventListener('change', () => { if (preview && preview.style.display !== 'none') updatePreview(); });
 }
 
 function initExportQuality() {
@@ -270,6 +272,20 @@ function initExportQuality() {
         localStorage.setItem(CUSTOM_QUALITY_FPS_KEY, customFPS.value);
       } catch (_) {}
     });
+  });
+}
+
+function initExportFormat() {
+  const select = document.getElementById('export-format');
+  if (!select) return;
+
+  try {
+    const saved = localStorage.getItem(EXPORT_FORMAT_KEY);
+    if (saved && ['webm', 'mp4'].includes(saved)) select.value = saved;
+  } catch (_) {}
+
+  select.addEventListener('change', () => {
+    try { localStorage.setItem(EXPORT_FORMAT_KEY, select.value); } catch (_) {}
   });
 }
 
@@ -388,6 +404,7 @@ function initTheme() {
     localStorage.removeItem(THEME_KEY);
     localStorage.removeItem(FILENAME_KEY);
     localStorage.removeItem(EXPORT_QUALITY_KEY);
+    localStorage.removeItem(EXPORT_FORMAT_KEY);
     localStorage.removeItem(RENDER_METHOD_KEY);
     localStorage.removeItem(CUSTOM_QUALITY_W_KEY);
     localStorage.removeItem(CUSTOM_QUALITY_H_KEY);
@@ -402,5 +419,7 @@ function initTheme() {
     if (fnInput) fnInput.value = FILENAME_DEFAULT;
     const qSel = document.getElementById('export-quality');
     if (qSel) qSel.value = 'high';
+    const fSel = document.getElementById('export-format');
+    if (fSel) fSel.value = EXPORT_FORMAT_DEFAULT;
   });
 }

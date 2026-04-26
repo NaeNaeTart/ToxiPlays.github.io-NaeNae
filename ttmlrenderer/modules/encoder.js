@@ -13,6 +13,7 @@
 
 import { state } from './state.js';
 import { getExportQualityProfile, formatTime, resolveFilename, updateRenderPreview } from './utils.js';
+import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 
 export function isWebCodecsSupported() {
   return (
@@ -60,14 +61,19 @@ export async function runFastRender(drawFrame, filenameSuffix) {
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d', { willReadFrequently: false });
 
+  const format = document.getElementById('export-format')?.value || 'webm';
+  const isMP4  = format === 'mp4';
+
   // Shared error state — either encoder dying stops the whole render
   let encoderError = null;
 
   // --- Video encoder setup ---
   const videoChunks = [];
+  let videoDecoderConfig = null;
 
   const videoEncoder = new VideoEncoder({
-    output(chunk) {
+    output(chunk, metadata) {
+      if (metadata.decoderConfig) videoDecoderConfig = metadata.decoderConfig;
       const buf = new Uint8Array(chunk.byteLength);
       chunk.copyTo(buf);
       videoChunks.push({
@@ -83,25 +89,25 @@ export async function runFastRender(drawFrame, filenameSuffix) {
     },
   });
 
-  let videoCodec = 'vp09.00.10.08';
-  const vp9Config = {
+  let videoCodec = isMP4 ? 'avc1.42E01F' : 'vp09.00.10.08';
+  const videoConfig = {
     codec:       videoCodec,
     width:       W,
     height:      H,
     framerate:   FPS,
     bitrate:     q.videoBitsPerSecond,
     bitrateMode: 'variable',
-    // 'realtime' keeps the internal queue small and prevents overflow crashes
     latencyMode: 'realtime',
     hardwareAcceleration: 'prefer-hardware',
   };
 
   try {
-    const support = await VideoEncoder.isConfigSupported(vp9Config);
-    if (!support.supported) throw new Error('VP9 not supported');
-    videoEncoder.configure(vp9Config);
-  } catch {
-    videoCodec = 'vp8';
+    const support = await VideoEncoder.isConfigSupported(videoConfig);
+    if (!support.supported) throw new Error(`${videoCodec} not supported`);
+    videoEncoder.configure(videoConfig);
+  } catch (e) {
+    console.warn(`[encoder] ${videoCodec} failed, falling back:`, e);
+    videoCodec = isMP4 ? 'avc1.42E01E' : 'vp8';
     videoEncoder.configure({
       codec:       videoCodec,
       width:       W,
@@ -259,7 +265,9 @@ export async function runFastRender(drawFrame, filenameSuffix) {
     }
     try { videoEncoder.close(); } catch {}
 
-    const blob = muxWebM(videoChunks, audioChunks, W, H, FPS, videoCodec);
+    const blob = isMP4
+      ? muxMP4(videoChunks, audioChunks, W, H, videoDecoderConfig)
+      : muxWebM(videoChunks, audioChunks, W, H, FPS, videoCodec);
 
     barFill.style.width = '100%';
     renderSub.textContent = 'Downloading…';
@@ -288,6 +296,46 @@ function _cleanup(overlay, titleEl) {
   overlay.classList.remove('active');
   document.getElementById('btn-render').classList.remove('rendering');
   titleEl.textContent = 'Rendering';
+}
+
+function muxMP4(videoChunks, audioChunks, W, H, videoDecoderConfig) {
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    video: {
+      codec: 'avc',
+      width: W,
+      height: H,
+    },
+    audio: audioChunks.length > 0 ? {
+      codec: 'opus',
+      sampleRate: 48000,
+      numberOfChannels: 2
+    } : undefined,
+    fastStart: 'fragmented'
+  });
+
+  for (const chunk of videoChunks) {
+    muxer.addVideoChunk({
+      data: chunk.data,
+      type: chunk.type,
+      timestamp: chunk.timestamp,
+      duration: chunk.duration
+    }, {
+      decoderConfig: videoDecoderConfig
+    });
+  }
+
+  for (const chunk of audioChunks) {
+    muxer.addAudioChunk({
+      data: chunk.data,
+      type: 'key',
+      timestamp: chunk.timestamp,
+      duration: chunk.duration
+    });
+  }
+
+  muxer.finalize();
+  return new Blob([muxer.target.buffer], { type: 'video/mp4' });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

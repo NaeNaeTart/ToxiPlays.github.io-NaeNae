@@ -2,6 +2,7 @@ export const APP_VERSION = '5.1.0';
 export const FILENAME_KEY     = 'ttml-renderer-filename';
 export const FILENAME_DEFAULT = '[%EXT% %TYPEU% TTMLRenderer v%VER#%] %AUDIO% (%TIME24%)';
 export const EXPORT_QUALITY_KEY  = 'ttml-renderer-export-quality';
+export const EXPORT_FORMAT_KEY   = 'ttml-renderer-export-format';
 export const RENDER_METHOD_KEY   = 'ttml-renderer-render-method';
 export const CUSTOM_QUALITY_W_KEY = 'ttml-renderer-custom-q-w';
 export const CUSTOM_QUALITY_H_KEY = 'ttml-renderer-custom-q-h';
@@ -40,6 +41,8 @@ export const OVERLAP_WARNING_MSG =
   'text jumping, or other unexpected behavior.\n\n' +
   'The Birds-eye View handles complex overlapping timing most reliably. ' +
   'If you want a stable render, it is recommended to use that instead.';
+
+export const EXPORT_FORMAT_DEFAULT = 'webm';
 
 export const THEME_KEY = 'ttml-renderer-theme';
 export const DEFAULTS = {

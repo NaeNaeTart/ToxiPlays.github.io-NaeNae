@@ -101,7 +101,8 @@ export function resolveFilename(type, now) {
     .replace(/%TYPE%/g,   typeStr);
 
   name = name.replace(/[/\\:*?"<>|]/g, '_').trim() || FILENAME_DEFAULT;
-  return name + '.webm';
+  const ext = document.getElementById('export-format')?.value || 'webm';
+  return name + '.' + ext;
 }
 
 export function setPlayIcon(iconState) {

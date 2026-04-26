@@ -13,6 +13,14 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="lyrics.css">
 <link rel="stylesheet" href="overlap.css">
+<script type="importmap">
+{
+  "imports": {
+    "mp4-muxer": "./node_modules/mp4-muxer/build/mp4-muxer.mjs",
+    "webm-muxer": "./node_modules/webm-muxer/build/webm-muxer.mjs"
+  }
+}
+</script>
 <script src="main.js" type="module" defer></script>
 <script src="fix-webm-duration.js"></script>
 <title>TTML Renderer</title>
@@ -219,6 +227,13 @@
       </select>
     </div>
     <div class="design-group">
+      <label>Export Format</label>
+      <select id="export-format" class="design-select">
+        <option value="webm" selected>WebM (.webm)</option>
+        <option value="mp4">MP4 (.mp4)</option>
+      </select>
+    </div>
+    <div class="design-group">
       <label>Export Quality</label>
       <select id="export-quality" class="design-select">
         <option value="ultra">Ultra (1920x1080 @ 60 FPS)</option>
@@ -289,7 +304,7 @@
       <div id="fn-vars-panel" style="display:none;border:1px solid var(--border);border-top:none;background:var(--bg);">
         <div style="padding:0.4rem 0.6rem;font-size:0.52rem;letter-spacing:0.15em;text-transform:uppercase;color:var(--text-dim);border-bottom:1px solid var(--border);">Click a variable to insert it</div>
         <div id="fn-vars-list"></div>
-        <div style="padding:0.4rem 0.6rem;font-size:0.52rem;color:var(--text-dim);letter-spacing:0.03em;border-top:1px solid var(--border);">.webm is appended automatically</div>
+        <div style="padding:0.4rem 0.6rem;font-size:0.52rem;color:var(--text-dim);letter-spacing:0.03em;border-top:1px solid var(--border);">The extension is appended automatically</div>
       </div>
     </div>
   </div>

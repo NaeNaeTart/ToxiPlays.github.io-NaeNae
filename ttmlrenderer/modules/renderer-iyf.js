@@ -14,7 +14,7 @@ export async function startInYourFaceRender() {
   const W = q.width, H = q.height, FPS = q.fps;
   const VIDEO_BPS = q.videoBitsPerSecond;
   const FONT_SIZE     = 100;
-  const LINE_SPACING  = 120;
+  const LINE_SPACING  = 200;
   const CENTER_Y      = H / 2;
   const MAX_W         = W - 160;
   const ADLIB_FADE    = 0.4;
@@ -42,20 +42,45 @@ export async function startInYourFaceRender() {
   }
 
   function wrapEntry(lineObj) {
-    const lineSpans = state.spans.filter(s => s.lineEl === lineObj.el);
-    const words = [];
-    let i = 0;
-    while (i < lineSpans.length) {
-      const s = lineSpans[i];
-      let txt = s.el.textContent;
-      let j = i + 1;
-      while (j < lineSpans.length && !/\s$/.test(lineSpans[j - 1].el.textContent)) {
-        txt += lineSpans[j].el.textContent;
-        j++;
+    const segments = [];
+    const spanByEl = new Map(state.spans.filter(s => s.lineEl === lineObj.el).map(s => [s.el, s]));
+
+    function walk(node) {
+      for (const child of node.childNodes) {
+        if (child.nodeType === Node.TEXT_NODE) {
+          if (child.textContent) segments.push({ isSpan: false, text: child.textContent });
+        } else if (child.nodeType === Node.ELEMENT_NODE) {
+          if (child.classList.contains('lyric-span')) {
+            const s = spanByEl.get(child);
+            if (s) segments.push({ isSpan: true, text: child.textContent, begin: s.begin, end: s.end });
+          } else {
+            walk(child);
+          }
+        }
       }
-      words.push({ text: processText(txt), begin: s.begin, end: lineSpans[j - 1].end });
-      i = j;
     }
+    walk(lineObj.el);
+
+    const words = [];
+    let curWord = { text: '', begin: -1, end: -1 };
+
+    for (const seg of segments) {
+      if (curWord.begin === -1 && seg.isSpan) curWord.begin = seg.begin;
+      if (seg.isSpan) curWord.end = seg.end;
+
+      const pText = processText(seg.text);
+      const parts = pText.split(/(\s+)/); // Split while preserving spaces
+      for (const part of parts) {
+        if (!part) continue;
+        curWord.text += part;
+        if (/\s/.test(part)) {
+          words.push(curWord);
+          curWord = { text: '', begin: -1, end: -1 };
+          // If the next segment is a span, it will start a new word
+        }
+      }
+    }
+    if (curWord.text) words.push(curWord);
     const rows = []; let curRow = []; let curW = 0;
     for (const w of words) {
       const ww = textCache.width(FONT_SIZE, w.text);
@@ -178,7 +203,7 @@ export async function startInYourFaceRender() {
       }
 
       if (bleedLine) {
-        const prevY     = CENTER_Y - LINE_SPACING * eased;
+        const prevY     = CENTER_Y - LINE_SPACING * 1.2 * eased;
         const bleedAge  = Math.max(0, (t - bleedLine.lineBegin) / Math.max(bleedLine.lineEnd - bleedLine.lineBegin, 0.001));
         const prevAlpha = Math.max(0, 0.6 * (1 - bleedAge)) * lyricAlpha;
         if (prevAlpha > 0) drawLine(bleedLine, prevY, prevAlpha, 'active');
@@ -192,7 +217,7 @@ export async function startInYourFaceRender() {
         const fadeIn  = Math.min(1, (t - al.lineBegin) / ADLIB_FADE);
         const fadeOut = Math.min(1, (al.lineEnd - t)   / ADLIB_FADE);
         const alAlpha = Math.min(fadeIn, fadeOut) * 0.8 * lyricAlpha;
-        if (alAlpha > 0) drawLine(al, CENTER_Y + LINE_SPACING, alAlpha, 'adlib');
+        if (alAlpha > 0) drawLine(al, CENTER_Y + LINE_SPACING * 1.2, alAlpha, 'adlib');
       }
     }
 
