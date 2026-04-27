@@ -10,14 +10,29 @@ export async function startInYourFaceRender() {
   overlay.classList.add('active');
   document.getElementById('btn-render').classList.add('rendering');
 
+  // ── Settings ──────────────────────────────────────────────────────────────
+  const casingMode  = document.getElementById('iyf-casing')?.value   || 'original';
+  const showProgBar = document.getElementById('iyf-show-progress')?.checked !== false;
+
+  function applyCase(str) {
+    if (casingMode === 'upper') return str.toUpperCase();
+    if (casingMode === 'lower') return str.toLowerCase();
+    return str;
+  }
+
   const q = getExportQualityProfile();
   const W = q.width, H = q.height, FPS = q.fps;
   const VIDEO_BPS = q.videoBitsPerSecond;
-  const FONT_SIZE     = 100;
-  const LINE_SPACING  = 200;
-  const CENTER_Y      = H / 2;
-  const MAX_W         = W - 160;
-  const ADLIB_FADE    = 0.4;
+  const FONT_SIZE    = 72;
+  const GHOST_SIZE   = 46;
+  const CENTER_X     = W / 2;
+  const CENTER_Y     = H / 2;
+  const LINE_SPACING = 118;
+  const MAX_LINE_PX  = W - 240;  // tighter margin so centering never clips edges
+  const JITTER_DUR   = 0.060;
+  const EASE_DUR     = 0.25;
+  const GAP_SPLIT    = 0.5;
+  const ADLIB_FADE   = 0.25;     // fade in/out duration for adlibs
   const LINE_FADE_GAP = 3.0;
 
   const cs = getComputedStyle(document.documentElement);
@@ -26,153 +41,562 @@ export async function startInYourFaceRender() {
   const COL_MID    = cs.getPropertyValue('--text-mid').trim()    || '#6a6a9a';
   const COL_BRIGHT = cs.getPropertyValue('--text-bright').trim() || '#c8c8e8';
   const COL_ACTIVE = cs.getPropertyValue('--accent').trim()      || '#e8f440';
+  const COL_ACTIVE2= cs.getPropertyValue('--accent2').trim()     || '#ff4d6d';
 
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
   const textCache = createTextMeasureCache(ctx, fs => `bold ${fs}px "DM Mono", monospace`);
 
-  const casing      = document.getElementById('iyf-casing').value;
-  const showProgBar = document.getElementById('iyf-show-progress').checked;
-
-  function processText(txt) {
-    if (casing === 'lower') return txt.toLowerCase();
-    if (casing === 'upper') return txt.toUpperCase();
-    return txt;
+  function easeOut(x) { return 1 - Math.pow(1 - x, 3.5); }
+  
+  function getSpanY_iyf(tok, t) {
+    if (t < tok.begin) return 2;
+    if (t >= tok.end)  return 0;
+    const el = t - tok.begin, dur = tok.end - tok.begin;
+    if (el < JITTER_DUR) return 2 + 3 * (el / JITTER_DUR);
+    return 5 * (1 - easeOut(Math.min((el - JITTER_DUR) / Math.max(dur - JITTER_DUR, 0.001), 1)));
   }
 
-  function wrapEntry(lineObj) {
-    const segments = [];
-    const spanByEl = new Map(state.spans.filter(s => s.lineEl === lineObj.el).map(s => [s.el, s]));
+  let _t = 0;
 
+  // ── Token collection ──────────────────────────────────────────────────────
+  // Each token: { text, begin, end, isSpan }
+  // Text nodes between spans are kept as { isSpan:false } — they carry the space.
+  function collectTokens(lineEl, lineSpans) {
+    const spanByEl = new Map(lineSpans.map(s => [s.el, s]));
+    const toks = [];
     function walk(node) {
       for (const child of node.childNodes) {
         if (child.nodeType === Node.TEXT_NODE) {
-          if (child.textContent) segments.push({ isSpan: false, text: child.textContent });
-        } else if (child.nodeType === Node.ELEMENT_NODE) {
-          if (child.classList.contains('lyric-span')) {
-            const s = spanByEl.get(child);
-            if (s) segments.push({ isSpan: true, text: child.textContent, begin: s.begin, end: s.end });
-          } else {
-            walk(child);
-          }
+          if (child.textContent) toks.push({ text: child.textContent, begin: null, end: null, isSpan: false });
+        } else if (child.classList?.contains('lyric-span')) {
+          const s = spanByEl.get(child);
+          if (s) toks.push({ text: applyCase(child.textContent), begin: s.begin, end: s.end, isSpan: true });
+        } else if (child.childNodes?.length) {
+          walk(child);
         }
       }
     }
-    walk(lineObj.el);
-
-    const words = [];
-    let curWord = { text: '', begin: -1, end: -1 };
-
-    for (const seg of segments) {
-      if (curWord.begin === -1 && seg.isSpan) curWord.begin = seg.begin;
-      if (seg.isSpan) curWord.end = seg.end;
-
-      const pText = processText(seg.text);
-      const parts = pText.split(/(\s+)/); // Split while preserving spaces
-      for (const part of parts) {
-        if (!part) continue;
-        curWord.text += part;
-        if (/\s/.test(part)) {
-          words.push(curWord);
-          curWord = { text: '', begin: -1, end: -1 };
-          // If the next segment is a span, it will start a new word
-        }
-      }
-    }
-    if (curWord.text) words.push(curWord);
-    const rows = []; let curRow = []; let curW = 0;
-    for (const w of words) {
-      const ww = textCache.width(FONT_SIZE, w.text);
-      if (curW + ww > MAX_W && curRow.length > 0) {
-        rows.push({ words: curRow, width: curW });
-        curRow = []; curW = 0;
-      }
-      curRow.push({ ...w, width: ww });
-      curW += ww;
-    }
-    if (curRow.length) rows.push({ words: curRow, width: curW });
-    return { lineBegin: lineObj.begin, lineEnd: lineObj.end, rows };
+    walk(lineEl);
+    return toks;
   }
 
-  const allEntries = state.lines.map(l => wrapEntry(l));
-  const nonAdlibs  = [];
-  const adlibs     = [];
-  state.lines.forEach((l, idx) => {
-    const entry = allEntries[idx];
-    if (l.el.classList.contains('adlib')) adlibs.push(entry);
-    else nonAdlibs.push(entry);
-  });
+  // ── Word grouping ─────────────────────────────────────────────────────────
+  // A "word" = run of non-whitespace tokens.
+  // Returns: { toks, trailSpace, begin, end, text }[]
+  //   toks      = span/punct tokens in this word (no spaces)
+  //   trailSpace = the whitespace text that follows ('' if none / last word)
+  //   begin/end  = timing from first/last span in the word
+  //   text       = joined display text
+  function tokensToWords(tokens) {
+    const words = [];
+    let i = 0;
+    while (i < tokens.length) {
+      const tok = tokens[i];
+      if (!tok.isSpan && /^\s+$/.test(tok.text)) { i++; continue; } // skip leading space
+      // Collect non-space tokens for this word
+      const wordToks = [];
+      while (i < tokens.length) {
+        const t = tokens[i];
+        if (!t.isSpan && /^\s+$/.test(t.text)) break; // space = word boundary
+        wordToks.push(t);
+        i++;
+      }
+      // Consume trailing space
+      let trailSpace = '';
+      if (i < tokens.length && !tokens[i].isSpan && /^\s+$/.test(tokens[i].text)) {
+        trailSpace = tokens[i].text;
+        i++;
+      }
+      if (!wordToks.length) continue;
+      const spanToks = wordToks.filter(t => t.isSpan);
+      words.push({
+        toks: wordToks,
+        trailSpace,
+        text: wordToks.map(t => t.text).join(''),
+        begin: spanToks[0]?.begin ?? null,
+        end:   spanToks[spanToks.length - 1]?.end ?? null,
+      });
+    }
+    return words;
+  }
+
+  // ── Measure a word list's total pixel width (including inter-word spaces) ──
+  function measureWords(words, fs) {
+    let w = 0;
+    for (let i = 0; i < words.length; i++) {
+      w += textCache.width(fs, words[i].text);
+      if (i < words.length - 1) {
+        const space = words[i].trailSpace || ' ';
+        w += textCache.width(fs, space);
+      }
+    }
+    return w;
+  }
+
+  // ── Splitting ─────────────────────────────────────────────────────────────
+  const ARTICLES   = new Set(['a','an','the','and','or','but','of','to','in','on','at','by','for','with','as']);
+  const PUNCT_SPLIT = /[?.!"]/;
+
+  function splitIntoChunks(words) {
+    if (!words.length) return [];
+    // Pass 1: split on gap or punctuation
+    const chunks = [[]];
+    for (let i = 0; i < words.length; i++) {
+      chunks[chunks.length - 1].push(words[i]);
+      if (i < words.length - 1) {
+        const gap = (words[i].end !== null && words[i + 1].begin !== null)
+          ? words[i + 1].begin - words[i].end : 0;
+        const lastChar = words[i].text.trimEnd().slice(-1);
+        if (gap >= GAP_SPLIT || PUNCT_SPLIT.test(lastChar)) chunks.push([]);
+      }
+    }
+    // Pass 2: further split any chunk that's too wide
+    const result = [];
+    for (const chunk of chunks) {
+      if (!chunk.length) continue;
+      if (measureWords(chunk, FONT_SIZE) <= MAX_LINE_PX) {
+        result.push(chunk);
+      } else {
+        result.push(...splitByCount(chunk));
+      }
+    }
+    return result.filter(c => c.length);
+  }
+
+  function splitByCount(words) {
+    const n = words.length;
+    if (n <= 1) return [words];
+    const size = n <= 6 ? Math.ceil(n / 2) : Math.min(5, Math.ceil(n / Math.ceil(n / 4)));
+    const out = [];
+    let i = 0;
+    while (i < n) {
+      let end = Math.min(i + size, n);
+      // Don't end on an article if avoidable
+      if (end < n && ARTICLES.has(words[end - 1].text.toLowerCase().replace(/[^a-z]/g, ''))) {
+        if (end + 1 <= n) end++;
+      }
+      out.push(words.slice(i, end));
+      i = end;
+    }
+    // Recurse: any chunk still too wide gets split again
+    const final = [];
+    for (const chunk of out) {
+      if (measureWords(chunk, FONT_SIZE) > MAX_LINE_PX && chunk.length > 1) {
+        final.push(...splitByCount(chunk));
+      } else {
+        final.push(chunk);
+      }
+    }
+    return final;
+  }
+
+  // ── Build iyfLines ────────────────────────────────────────────────────────
+  // Each iyfLine: { words (word[]), lineBegin, lineEnd, isAdlib }
+  // words[] preserves spacing via trailSpace
+
+  const iyfLines = [];
+  const lastSpanEnd = state.spans.length ? Math.max(...state.spans.map(s => s.end)) : state.duration;
+  const creditEl    = document.querySelector('.songwriter-credit');
+  const creditText  = creditEl ? creditEl.textContent?.trim() || null : null;
+
+  for (const l of state.lines) {
+    const isAdlib   = l.el.classList.contains('adlib');
+    const agent     = l.el.dataset.agent || 'v1';
+    const isV2      = agent === 'v2';
+    const lineSpans = state.spans.filter(s => s.lineEl === l.el);
+    if (!lineSpans.length) continue;
+
+    const tokens = collectTokens(l.el, lineSpans);
+    const words  = tokensToWords(tokens);
+    if (!words.length) continue;
+
+    const chunks = splitIntoChunks(words);
+    for (const chunk of chunks) {
+      const spanToks = chunk.flatMap(w => w.toks.filter(t => t.isSpan));
+      if (!spanToks.length) continue;
+      const begin = spanToks[0]?.begin ?? null;
+      const end   = spanToks[spanToks.length - 1]?.end ?? null;
+      if (begin === null || end === null) continue;
+
+      iyfLines.push({
+        words: chunk,
+        lineBegin: begin,
+        lineEnd: end,
+        isAdlib,
+        isV2,
+      });
+    }
+  }
+
+  const nonAdlibs = iyfLines.filter(l => !l.isAdlib);
+  const adlibs    = iyfLines.filter(l => l.isAdlib);
 
   const gapAfter = nonAdlibs.map((curr, idx) => {
     const next = nonAdlibs[idx + 1];
     if (!next) return null;
     const dur = next.lineBegin - curr.lineEnd;
+    if (dur < 5) return null;  // Only show gap bar for gaps >= 5s
     return { start: curr.lineEnd, end: next.lineBegin, duration: dur };
   });
 
-  const lastSpanEnd = state.spans.length ? Math.max(...state.spans.map(s => s.end)) : state.duration;
-  const creditEl    = document.querySelector('.songwriter-credit');
-  const creditText  = creditEl ? creditEl.textContent : null;
-  const CREDIT_DUR  = 3.0;
+  const CREDIT_START = lastSpanEnd;
+  const CREDIT_DUR   = 3.0;
+  const creditLinesIyf = creditText
+    ? creditText.split('\n').map(line => applyCase(line.trim())).filter(l => l)
+    : [];
 
-  function drawCredits(t) {
-    if (!creditText || t < lastSpanEnd + 0.5) return;
-    const alpha = Math.min(1, (t - (lastSpanEnd + 0.5)) / 0.8);
-    ctx.globalAlpha = alpha * 0.8;
-    ctx.font = `bold 32px "DM Mono", monospace`;
-    ctx.fillStyle = COL_BRIGHT;
-    ctx.textAlign = 'center';
-    ctx.fillText(processText(creditText), W / 2, CENTER_Y);
-    ctx.textAlign = 'left';
+  function getCurrentNAPos(t) {
+    for (let i = 0; i < nonAdlibs.length; i++) {
+      if (t >= nonAdlibs[i].lineBegin && t < nonAdlibs[i].lineEnd) return i;
+    }
+    // Find closest preceding non-adlib
+    for (let i = nonAdlibs.length - 1; i >= 0; i--) {
+      if (t >= nonAdlibs[i].lineBegin) return i;
+    }
+    return -1;
+  }
+
+  function drawLine(line, y, alpha, type, t, isV2) {
+    ctx.globalAlpha = alpha;
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold ${FONT_SIZE}px "DM Mono", monospace`;
+    
+    const lineColor = isV2 ? COL_ACTIVE2 : COL_ACTIVE;
+    let x = CENTER_X;
+    let lineW = measureWords(line.words, FONT_SIZE);
+    x -= lineW / 2;
+
+    for (const w of line.words) {
+      for (const tok of w.toks) {
+        const tw = textCache.width(FONT_SIZE, tok.text);
+        
+        if (!tok.isSpan) {
+          // Non-span tokens: always drawn in COL_DIM
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = COL_DIM;
+          ctx.shadowBlur = 0;
+          ctx.fillText(tok.text, x, y);
+        } else {
+          // Span tokens: implement color sweep and jitter
+          const future = t < tok.begin;
+          const past = t >= tok.end;
+          const bump = getSpanY_iyf(tok, t);
+          
+          if (future) {
+            // Not yet sung: invisible
+            ctx.globalAlpha = 0;
+            ctx.fillText(tok.text, x, y);
+          } else if (past) {
+            // Fully sung: solid color with jitter settling to 0
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = lineColor;
+            ctx.shadowBlur = 0;
+            ctx.fillText(tok.text, x, y + bump);
+          } else {
+            // Currently singing: dim background + color sweep
+            const prog = (t - tok.begin) / Math.max(tok.end - tok.begin, 0.001);
+            const sweep = prog * tw;
+            
+            // Draw dim background
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = COL_DIM;
+            ctx.shadowBlur = 0;
+            ctx.fillText(tok.text, x, y + bump);
+            
+            // Draw sweep portion in active color
+            if (sweep > 0) {
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(x, y - FONT_SIZE, sweep, FONT_SIZE * 2);
+              ctx.clip();
+              ctx.fillStyle = lineColor;
+              ctx.shadowBlur = 0;
+              ctx.fillText(tok.text, x, y + bump);
+              ctx.restore();
+            }
+          }
+        }
+        x += tw;
+      }
+      const space = w.trailSpace || ' ';
+      x += textCache.width(FONT_SIZE, space);
+    }
+    ctx.globalAlpha = alpha;
+  }
+
+  function drawAdlib(line, y, alpha, t) {
+    const ADLIB_MAX_W = MAX_LINE_PX;
+    const MIN_FS = Math.round(GHOST_SIZE * 0.80);
+    
+    // Step 1: find the smallest font size that fits
+    let fs = GHOST_SIZE;
+    while (fs > MIN_FS && measureWords(line.words, fs) > ADLIB_MAX_W) {
+      fs--;
+    }
+    
+    // Step 2: check if it fits at MIN_FS
+    const totalW = measureWords(line.words, fs);
+    const adlibWords = line.words;
+    
+    if (totalW <= ADLIB_MAX_W) {
+      // Fits on single line — draw with parentheses, no wrapping
+      drawAdlibLine(adlibWords, y, fs, alpha, t);
+    } else {
+      // Only wrap if it still doesn't fit at MIN_FS
+      // Wrap: greedily pack words into rows
+      const rows = [];
+      let curRow = [], curW = 0;
+      
+      for (let wi = 0; wi < adlibWords.length; wi++) {
+        const word = adlibWords[wi];
+        const wordW = textCache.width(fs, word.text);
+        const gapW = curRow.length > 0 ? textCache.width(fs, word.trailSpace || ' ') : 0;
+        
+        if (curRow.length > 0 && curW + gapW + wordW > ADLIB_MAX_W) {
+          rows.push({ words: curRow, width: curW });
+          curRow = [word];
+          curW = wordW;
+        } else {
+          if (curRow.length > 0) curW += gapW;
+          curRow.push(word);
+          curW += wordW;
+        }
+      }
+      if (curRow.length) rows.push({ words: curRow, width: curW });
+      
+      // Draw rows centered vertically around y
+      const rowH = fs + 6;
+      const totalH = rows.length * rowH;
+      let rowY = y - (totalH / 2) + rowH / 2;
+      
+      for (let ri = 0; ri < rows.length; ri++) {
+        const row = rows[ri];
+        const isFirst = ri === 0;
+        const isLast = ri === rows.length - 1;
+        drawAdlibLine(row.words, rowY, fs, alpha, t, isFirst, isLast);
+        rowY += rowH;
+      }
+    }
+  }
+  
+  function drawAdlibLine(words, y, fs, alpha, t, isFirstRow = true, isLastRow = true) {
+    ctx.globalAlpha = alpha;
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold ${fs}px "DM Mono", monospace`;
+    
+    // Measure content width
+    let contentW = 0;
+    for (let wi = 0; wi < words.length; wi++) {
+      contentW += textCache.width(fs, words[wi].text);
+      if (wi < words.length - 1) {
+        const sp = words[wi].trailSpace || ' ';
+        contentW += textCache.width(fs, sp);
+      }
+    }
+    
+    const parenW = textCache.width(fs, '(');
+    const totalW = (isFirstRow ? parenW : 0) + contentW + (isLastRow ? parenW : 0);
+    let x = CENTER_X - totalW / 2;
+    
+    // Draw opening paren (only on first row)
+    if (isFirstRow) {
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = COL_MID;
+      ctx.shadowBlur = 0;
+      
+      // Find first span for opening paren color sweep
+      let firstSpan = null;
+      for (const w of words) {
+        for (const tok of w.toks) {
+          if (tok.isSpan) {
+            firstSpan = tok;
+            break;
+          }
+        }
+        if (firstSpan) break;
+      }
+      
+      // Opening paren color sweep (60% of first span duration, starting ADLIB_FADE before)
+      if (firstSpan) {
+        const sweepStart = firstSpan.begin - ADLIB_FADE;
+        const sweepDur = (firstSpan.end - firstSpan.begin) * 0.6;
+        const sweepEnd = firstSpan.begin + sweepDur;
+        
+        // Draw dim background first
+        ctx.fillStyle = COL_MID;
+        ctx.fillText('(', x, y);
+        
+        // Overlay with bright color if it's been highlighted
+        if (t >= sweepStart && t < sweepEnd) {
+          // Still sweeping
+          const prog = (t - sweepStart) / sweepDur;
+          const sweep = prog * parenW;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(x, y - fs, sweep, fs * 2);
+          ctx.clip();
+          ctx.fillStyle = COL_BRIGHT;
+          ctx.shadowBlur = 0;
+          ctx.fillText('(', x, y);
+          ctx.restore();
+        } else if (t >= sweepEnd) {
+          // Sweep is done, keep it highlighted
+          ctx.fillStyle = COL_BRIGHT;
+          ctx.shadowBlur = 0;
+          ctx.fillText('(', x, y);
+        }
+      } else {
+        ctx.fillText('(', x, y);
+      }
+      
+      x += parenW;
+    }
+    
+    // Draw content with color sweep
+    for (let wi = 0; wi < words.length; wi++) {
+      const word = words[wi];
+      for (const tok of word.toks) {
+        const tw = textCache.width(fs, tok.text);
+        
+        if (!tok.isSpan) {
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = COL_MID;
+          ctx.shadowBlur = 0;
+          ctx.fillText(tok.text, x, y);
+        } else {
+          const past = t >= tok.end;
+          const prog = (t >= tok.begin && !past)
+            ? (t - tok.begin) / Math.max(tok.end - tok.begin, 0.001)
+            : (past ? 1 : 0);
+          
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = COL_MID;
+          ctx.shadowBlur = 0;
+          ctx.fillText(tok.text, x, y);
+          
+          if (prog > 0) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(x, y - fs, prog * tw, fs * 2);
+            ctx.clip();
+            ctx.fillStyle = COL_BRIGHT;
+            ctx.shadowBlur = 0;
+            ctx.fillText(tok.text, x, y);
+            ctx.restore();
+          }
+        }
+        x += tw;
+      }
+      if (wi < words.length - 1) {
+        const sp = word.trailSpace || ' ';
+        x += textCache.width(fs, sp);
+      }
+    }
+    
+    // Draw closing paren (only on last row)
+    if (isLastRow) {
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = COL_MID;
+      ctx.shadowBlur = 0;
+      
+      // Find last span for closing paren color sweep
+      let lastSpan = null;
+      for (let wi = words.length - 1; wi >= 0; wi--) {
+        for (let ti = words[wi].toks.length - 1; ti >= 0; ti--) {
+          const tok = words[wi].toks[ti];
+          if (tok.isSpan) {
+            lastSpan = tok;
+            break;
+          }
+        }
+        if (lastSpan) break;
+      }
+      
+      // Closing paren color sweep: from last span end, over whichever is shorter:
+      // - ADLIB_FADE, OR
+      // - time until next adlib starts
+      if (lastSpan) {
+        const sweepStart = lastSpan.end;
+        
+        // Find next adlib start time
+        const currentAdlib = adlibs.find(a => a.words === words);
+        let nextAdlibTime = sweepStart + ADLIB_FADE;
+        if (currentAdlib) {
+          const nextAdlib = adlibs.find(a => a.lineBegin > currentAdlib.lineEnd);
+          if (nextAdlib) {
+            nextAdlibTime = nextAdlib.lineBegin;
+          }
+        }
+        
+        const sweepDur = Math.min(ADLIB_FADE, nextAdlibTime - sweepStart);
+        const sweepEnd = sweepStart + sweepDur;
+        
+        // Draw dim background first
+        ctx.fillStyle = COL_MID;
+        ctx.fillText(')', x, y);
+        
+        // Overlay with bright color if it's in the sweep window
+        if (t >= sweepStart && t < sweepEnd) {
+          // Still sweeping
+          const prog = (t - sweepStart) / sweepDur;
+          const sweep = prog * parenW;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(x, y - fs, sweep, fs * 2);
+          ctx.clip();
+          ctx.fillStyle = COL_BRIGHT;
+          ctx.shadowBlur = 0;
+          ctx.fillText(')', x, y);
+          ctx.restore();
+        } else if (t >= sweepEnd) {
+          // Sweep is done, keep it highlighted
+          ctx.fillStyle = COL_BRIGHT;
+          ctx.shadowBlur = 0;
+          ctx.fillText(')', x, y);
+        }
+      } else {
+        ctx.fillText(')', x, y);
+      }
+    }
+    
     ctx.globalAlpha = 1;
   }
 
-  function drawLine(entry, y, alpha, type) {
-    ctx.globalAlpha = alpha;
-    ctx.font = `bold ${FONT_SIZE}px "DM Mono", monospace`;
-    ctx.textBaseline = 'middle';
-    let rowY = y - ((entry.rows.length - 1) * LINE_SPACING) / 2;
-    for (const row of entry.rows) {
-      let x = W / 2 - row.width / 2;
-      for (const w of row.words) {
-        ctx.fillStyle = (type === 'active' && _t >= w.begin && _t < w.end) ? COL_ACTIVE : (type === 'adlib' ? COL_MID : COL_BRIGHT);
-        ctx.fillText(w.text, x, rowY);
-        x += w.width;
-      }
-      rowY += LINE_SPACING;
-    }
+  function drawCredits(t) {
+    if (!creditLinesIyf.length || t < CREDIT_START) return;
+    const alpha = Math.min(1, (t - CREDIT_START) / CREDIT_DUR) * 0.85;
+    if (alpha <= 0) return;
+    ctx.font = `bold 26px "DM Mono", monospace`;
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+    ctx.fillStyle = COL_BRIGHT; ctx.globalAlpha = alpha;
+    const lh = 38;
+    let y = CENTER_Y - (creditLinesIyf.length - 1) * lh / 2;
+    for (const cl of creditLinesIyf) { ctx.fillText(cl, CENTER_X, y); y += lh; }
+    ctx.globalAlpha = 1; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   }
 
-  const EASE_DUR = 0.4;
-  function easeOut(x) { return 1 - Math.pow(1 - x, 3); }
-
-  let _t = 0;
+  // ── Transition state ──────────────────────────────────────────────────────
+  let lastNAPos       = -1;
   let transitionStart = -1;
-  let lastNAPos = -1;
-  let bleedLine = null;
+  let bleedLine       = null;
 
-  function getAdlibsAt(t) { return adlibs.filter(a => t >= a.lineBegin && t < a.lineEnd); }
-
+  // ── Main draw ─────────────────────────────────────────────────────────────
   function drawFrame_iyf(t) {
-    _t = t;
+    _t = t;  // Update global time for getSpanY_iyf and color sweep calculations
     ctx.fillStyle = BG;
     ctx.fillRect(0, 0, W, H);
 
+    // Credit crossfade: lyrics fade out as credits fade in
     let lyricAlpha = 1;
-    if (creditText && t >= lastSpanEnd + 0.5) lyricAlpha = Math.max(0, 1 - (t - (lastSpanEnd + 0.5)) / 0.5);
-
-    let naPos = -1;
-    for (let i = 0; i < nonAdlibs.length; i++) {
-      if (t >= nonAdlibs[i].lineBegin && t < nonAdlibs[i].lineEnd) { naPos = i; break; }
-    }
-    if (naPos === -1) {
-      for (let i = 0; i < nonAdlibs.length; i++) {
-        if (t < nonAdlibs[i].lineBegin) break;
-        naPos = i;
-      }
+    if (creditText && t >= CREDIT_START) {
+      lyricAlpha = Math.max(0, 1 - (t - CREDIT_START) / 0.8);
     }
 
+    const naPos = getCurrentNAPos(t);
+
+    // Detect transition to new line
     if (naPos !== lastNAPos) {
       if (lastNAPos >= 0) {
         const prev = nonAdlibs[lastNAPos];
@@ -193,6 +617,7 @@ export async function startInYourFaceRender() {
       const curLine  = nonAdlibs[naPos];
       const curY     = CENTER_Y + LINE_SPACING * (1 - eased);
 
+      // Current line alpha: fade out if it's done and the next gap is ≥3s
       let curAlpha = Math.max(0.05, eased) * lyricAlpha;
       if (t >= curLine.lineEnd) {
         const gap = gapAfter[naPos];
@@ -202,46 +627,75 @@ export async function startInYourFaceRender() {
         }
       }
 
+      // Previous slot: bleed only
       if (bleedLine) {
-        const prevY     = CENTER_Y - LINE_SPACING * 1.2 * eased;
+        const prevY     = CENTER_Y - LINE_SPACING * eased;
         const bleedAge  = Math.max(0, (t - bleedLine.lineBegin) / Math.max(bleedLine.lineEnd - bleedLine.lineBegin, 0.001));
         const prevAlpha = Math.max(0, 0.6 * (1 - bleedAge)) * lyricAlpha;
-        if (prevAlpha > 0) drawLine(bleedLine, prevY, prevAlpha, 'active');
+        // bleedLine is the line object that contains isV2 property
+        const isV2 = bleedLine.isV2 || false;
+        if (prevAlpha > 0) drawLine(bleedLine, prevY, prevAlpha, 'active', t, isV2);
       }
 
-      if (curAlpha > 0) drawLine(curLine, curY, curAlpha, 'active');
+      // Current line
+      // curLine is the line object that contains isV2 property
+      const isV2 = curLine.isV2 || false;
+      if (curAlpha > 0) drawLine(curLine, curY, curAlpha, 'active', t, isV2);
 
-      const activeAdlibs = getAdlibsAt(t);
+      // Adlib slot: fade in ADLIB_FADE before lineBegin, fade out ADLIB_FADE after lineEnd
+      // BUT: don't fade out if another adlib is coming within ADLIB_FADE time
+      const activeAdlibs = adlibs.filter(a => {
+        // Adlib is active if we're within ADLIB_FADE before OR within the line OR within ADLIB_FADE after
+        return t >= (a.lineBegin - ADLIB_FADE) && t < (a.lineEnd + ADLIB_FADE);
+      });
+      
       if (activeAdlibs.length > 0) {
-        const al      = activeAdlibs[0];
-        const fadeIn  = Math.min(1, (t - al.lineBegin) / ADLIB_FADE);
-        const fadeOut = Math.min(1, (al.lineEnd - t)   / ADLIB_FADE);
+        const al = activeAdlibs[0];
+        // Fade in: starts ADLIB_FADE before lineBegin, reaches full at lineBegin
+        const fadeInStart = al.lineBegin - ADLIB_FADE;
+        let fadeIn = Math.min(1, Math.max(0, (t - fadeInStart) / ADLIB_FADE));
+        
+        // Check if another adlib is coming within ADLIB_FADE time
+        const nextAdlib = adlibs.find(a => a.lineBegin > al.lineEnd && a.lineBegin - t <= ADLIB_FADE);
+        
+        // Fade out: starts at lineEnd, reaches 0 at lineEnd + ADLIB_FADE
+        // BUT: if another adlib is coming, stay at full opacity until it starts
+        let fadeOut = 1;
+        if (!nextAdlib) {
+          // No adlib coming soon, so fade out normally
+          fadeOut = Math.min(1, Math.max(0, (al.lineEnd + ADLIB_FADE - t) / ADLIB_FADE));
+        }
+        
         const alAlpha = Math.min(fadeIn, fadeOut) * 0.8 * lyricAlpha;
-        if (alAlpha > 0) drawLine(al, CENTER_Y + LINE_SPACING * 1.2, alAlpha, 'adlib');
+        if (alAlpha > 0) {
+          drawAdlib(al, CENTER_Y + LINE_SPACING, alAlpha, t);
+        }
       }
     }
 
-    const fadeH = 90;
-    const topFade = ctx.createLinearGradient(0, CENTER_Y - LINE_SPACING - fadeH, 0, CENTER_Y - LINE_SPACING + 30);
-    topFade.addColorStop(0, BG); topFade.addColorStop(1, 'rgba(0,0,0,0)');
-    const botFade = ctx.createLinearGradient(0, CENTER_Y + LINE_SPACING - 30, 0, CENTER_Y + LINE_SPACING + fadeH);
-    botFade.addColorStop(0, 'rgba(0,0,0,0)'); botFade.addColorStop(1, BG);
-    ctx.fillStyle = topFade; ctx.fillRect(0, 0, W, CENTER_Y);
-    ctx.fillStyle = botFade; ctx.fillRect(0, CENTER_Y, W, H - CENTER_Y);
-
+    // ── Progress bar / gap bar ────────────────────────────────────────────
     const BAR_H = 4, BAR_Y = H - 36, BAR_PAD = 80, barW = W - BAR_PAD * 2;
     if (showProgBar && state.duration > 0) {
-      ctx.globalAlpha = 0.3; ctx.fillStyle = COL_MID; ctx.fillRect(BAR_PAD, BAR_Y, barW, BAR_H);
-      ctx.globalAlpha = 1;   ctx.fillStyle = COL_ACTIVE; ctx.fillRect(BAR_PAD, BAR_Y, barW * Math.min(t / state.duration, 1), BAR_H);
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = COL_MID;
+      ctx.fillRect(BAR_PAD, BAR_Y, barW, BAR_H);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = COL_ACTIVE;
+      ctx.fillRect(BAR_PAD, BAR_Y, barW * Math.min(t / state.duration, 1), BAR_H);
     } else if (naPos >= 0) {
       const gap = gapAfter[naPos];
       if (gap && t >= gap.start && t < gap.end) {
         const gapProgress = (t - gap.start) / gap.duration;
-        ctx.globalAlpha = 0.3; ctx.fillStyle = COL_MID; ctx.fillRect(BAR_PAD, BAR_Y, barW, BAR_H);
-        ctx.globalAlpha = 1;   ctx.fillStyle = COL_ACTIVE; ctx.fillRect(BAR_PAD, BAR_Y, barW * gapProgress, BAR_H);
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = COL_MID;
+        ctx.fillRect(BAR_PAD, BAR_Y, barW, BAR_H);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = COL_ACTIVE;
+        ctx.fillRect(BAR_PAD, BAR_Y, barW * gapProgress, BAR_H);
         ctx.globalAlpha = 1;
       }
     }
+
     drawCredits(t);
   }
 
@@ -275,8 +729,13 @@ export async function startInYourFaceRender() {
 
   function doIYFTick(wallMs) {
     if (state.renderCancelled || renderDone) return;
-    if (wallMs - lastDrawTime < FRAME_MS - 1) { iyfRafId = requestAnimationFrame(doIYFTick); return; }
+
+    if (wallMs - lastDrawTime < FRAME_MS - 1) {
+      iyfRafId = requestAnimationFrame(doIYFTick);
+      return;
+    }
     lastDrawTime = wallMs;
+
     const t = Math.max(renderACtx.currentTime - audioStartTime, 0);
     const endAt = Math.max(state.duration + 1.5, creditText ? lastSpanEnd + CREDIT_DUR + 2.5 : 0);
     if (t > endAt) {
@@ -292,6 +751,7 @@ export async function startInYourFaceRender() {
     renderSub.textContent = formatTime(t) + ' / ' + formatTime(state.duration);
     iyfRafId = requestAnimationFrame(doIYFTick);
   }
+
   iyfRafId = requestAnimationFrame(doIYFTick);
 
   recorder.onstop = () => {
