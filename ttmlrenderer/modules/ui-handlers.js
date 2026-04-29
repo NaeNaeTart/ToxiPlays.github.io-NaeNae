@@ -10,7 +10,7 @@ import {
 import { parseTTML } from './parser.js';
 import { ensureContext, startPlayback } from './audio.js';
 import { seekToTime, syncLoop } from './sync.js';
-import { startRender } from './renderer-scroll.js';
+import { startRender } from './renderer-scroll.js?v=3';
 import { _teardownRender } from './renderer-shared.js';
 
 export function initUI() {

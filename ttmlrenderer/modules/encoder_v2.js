@@ -15,6 +15,8 @@ import { state } from './state.js';
 import { getExportQualityProfile, formatTime, resolveFilename, updateRenderPreview } from './utils.js';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 
+console.log('[encoder] Loaded v2 with addVideoChunkRaw support');
+
 export function isWebCodecsSupported() {
   return (
     typeof VideoEncoder !== 'undefined' &&
@@ -287,6 +289,9 @@ export async function runFastRender(drawFrame, filenameSuffix) {
     await new Promise(r => setTimeout(r, 3000));
     barFill.style.background = '';
   } finally {
+    videoChunks.length = 0;
+    audioChunks.length = 0;
+
     _cleanup(overlay, titleEl);
     state.renderInProgress = false;
   }
@@ -314,24 +319,34 @@ function muxMP4(videoChunks, audioChunks, W, H, videoDecoderConfig) {
     fastStart: 'fragmented'
   });
 
+  console.log(`[encoder] Muxing ${videoChunks.length} video chunks and ${audioChunks.length} audio chunks`);
   for (const chunk of videoChunks) {
-    muxer.addVideoChunk({
-      data: chunk.data,
-      type: chunk.type,
-      timestamp: chunk.timestamp,
-      duration: chunk.duration
-    }, {
-      decoderConfig: videoDecoderConfig
-    });
+    try {
+      muxer.addVideoChunkRaw(
+        chunk.data,
+        chunk.type,
+        chunk.timestamp,
+        chunk.duration,
+        { decoderConfig: videoDecoderConfig }
+      );
+    } catch (e) {
+      console.error('[encoder] Error adding video chunk:', e);
+      throw e;
+    }
   }
 
   for (const chunk of audioChunks) {
-    muxer.addAudioChunk({
-      data: chunk.data,
-      type: 'key',
-      timestamp: chunk.timestamp,
-      duration: chunk.duration
-    });
+    try {
+      muxer.addAudioChunkRaw(
+        chunk.data,
+        'key',
+        chunk.timestamp,
+        chunk.duration
+      );
+    } catch (e) {
+      console.error('[encoder] Error adding audio chunk:', e);
+      throw e;
+    }
   }
 
   muxer.finalize();

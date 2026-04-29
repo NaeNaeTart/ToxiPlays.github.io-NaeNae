@@ -4,7 +4,7 @@ import { checkOverlappingTiming, showOverlapWarning } from './renderer-shared.js
 import { startKaraokeRender } from './renderer-karaoke.js';
 import { startInYourFaceRender } from './renderer-iyf.js';
 import { startAmlRender } from './renderer-aml.js';
-import { isWebCodecsSupported, shouldUseFastRender, runFastRender } from './encoder.js';
+import { isWebCodecsSupported, shouldUseFastRender, runFastRender } from './encoder_v2.js?v=3';
 
 export async function startRender() {
   if (!state.audioBuffer || !state.spans.length) return;

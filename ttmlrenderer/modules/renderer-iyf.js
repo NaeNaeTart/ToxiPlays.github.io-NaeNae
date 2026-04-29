@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import { getExportQualityProfile, createTextMeasureCache, clearRenderPreview, updateRenderPreview, formatTime, resolveFilename } from './utils.js';
+import { shouldUseFastRender, runFastRender } from './encoder_v2.js?v=3';
 
 export async function startInYourFaceRender() {
   state.renderCancelled  = false;
@@ -27,10 +28,10 @@ export async function startInYourFaceRender() {
   const GHOST_SIZE   = 46;
   const CENTER_X     = W / 2;
   const CENTER_Y     = H / 2;
-  const LINE_SPACING = 118;
+  const LINE_SPACING = 140;
   const MAX_LINE_PX  = W - 240;  // tighter margin so centering never clips edges
-  const JITTER_DUR   = 0.060;
-  const EASE_DUR     = 0.25;
+  const JITTER_DUR   = 0.080;
+  const EASE_DUR     = 0.35;
   const GAP_SPLIT    = 0.5;
   const ADLIB_FADE   = 0.25;     // fade in/out duration for adlibs
   const LINE_FADE_GAP = 3.0;
@@ -45,7 +46,7 @@ export async function startInYourFaceRender() {
 
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d');
+  let ctx = canvas.getContext('2d');
   const textCache = createTextMeasureCache(ctx, fs => `bold ${fs}px "DM Mono", monospace`);
 
   function easeOut(x) { return 1 - Math.pow(1 - x, 3.5); }
@@ -54,8 +55,8 @@ export async function startInYourFaceRender() {
     if (t < tok.begin) return 2;
     if (t >= tok.end)  return 0;
     const el = t - tok.begin, dur = tok.end - tok.begin;
-    if (el < JITTER_DUR) return 2 + 3 * (el / JITTER_DUR);
-    return 5 * (1 - easeOut(Math.min((el - JITTER_DUR) / Math.max(dur - JITTER_DUR, 0.001), 1)));
+    if (el < JITTER_DUR) return 4 + 6 * (el / JITTER_DUR);
+    return 10 * (1 - easeOut(Math.min((el - JITTER_DUR) / Math.max(dur - JITTER_DUR, 0.001), 1)));
   }
 
   let _t = 0;
@@ -247,10 +248,18 @@ export async function startInYourFaceRender() {
     ? creditText.split('\n').map(line => applyCase(line.trim())).filter(l => l)
     : [];
 
-  function getCurrentNAPos(t) {
+  function getActiveNAPoses(t) {
+    const poses = [];
     for (let i = 0; i < nonAdlibs.length; i++) {
-      if (t >= nonAdlibs[i].lineBegin && t < nonAdlibs[i].lineEnd) return i;
+      if (t >= nonAdlibs[i].lineBegin && t < nonAdlibs[i].lineEnd) poses.push(i);
     }
+    return poses;
+  }
+
+  function getFocusNAPos(t) {
+    const active = getActiveNAPoses(t);
+    if (active.length > 0) return active[active.length - 1]; // Focus on the latest started line
+    
     // Find closest preceding non-adlib
     for (let i = nonAdlibs.length - 1; i >= 0; i--) {
       if (t >= nonAdlibs[i].lineBegin) return i;
@@ -258,10 +267,10 @@ export async function startInYourFaceRender() {
     return -1;
   }
 
-  function drawLine(line, y, alpha, type, t, isV2) {
-    ctx.globalAlpha = alpha;
-    ctx.textBaseline = 'middle';
-    ctx.font = `bold ${FONT_SIZE}px "DM Mono", monospace`;
+  function drawLine(line, y, alpha, type, t, isV2, ctx2d = ctx) {
+    ctx2d.globalAlpha = alpha;
+    ctx2d.textBaseline = 'middle';
+    ctx2d.font = `bold ${FONT_SIZE}px "DM Mono", monospace`;
     
     const lineColor = isV2 ? COL_ACTIVE2 : COL_ACTIVE;
     let x = CENTER_X;
@@ -402,9 +411,9 @@ export async function startInYourFaceRender() {
     
     // Draw opening paren (only on first row)
     if (isFirstRow) {
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = COL_MID;
-      ctx.shadowBlur = 0;
+      ctx2d.globalAlpha = alpha;
+      ctx2d.fillStyle = COL_MID;
+      ctx2d.shadowBlur = 0;
       
       // Find first span for opening paren color sweep
       let firstSpan = null;
@@ -425,30 +434,30 @@ export async function startInYourFaceRender() {
         const sweepEnd = firstSpan.begin + sweepDur;
         
         // Draw dim background first
-        ctx.fillStyle = COL_MID;
-        ctx.fillText('(', x, y);
+        ctx2d.fillStyle = COL_MID;
+        ctx2d.fillText('(', x, y);
         
         // Overlay with bright color if it's been highlighted
         if (t >= sweepStart && t < sweepEnd) {
           // Still sweeping
           const prog = (t - sweepStart) / sweepDur;
           const sweep = prog * parenW;
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(x, y - fs, sweep, fs * 2);
-          ctx.clip();
-          ctx.fillStyle = COL_BRIGHT;
-          ctx.shadowBlur = 0;
-          ctx.fillText('(', x, y);
-          ctx.restore();
+          ctx2d.save();
+          ctx2d.beginPath();
+          ctx2d.rect(x, y - fs, sweep, fs * 2);
+          ctx2d.clip();
+          ctx2d.fillStyle = COL_BRIGHT;
+          ctx2d.shadowBlur = 0;
+          ctx2d.fillText('(', x, y);
+          ctx2d.restore();
         } else if (t >= sweepEnd) {
           // Sweep is done, keep it highlighted
-          ctx.fillStyle = COL_BRIGHT;
-          ctx.shadowBlur = 0;
-          ctx.fillText('(', x, y);
+          ctx2d.fillStyle = COL_BRIGHT;
+          ctx2d.shadowBlur = 0;
+          ctx2d.fillText('(', x, y);
         }
       } else {
-        ctx.fillText('(', x, y);
+        ctx2d.fillText('(', x, y);
       }
       
       x += parenW;
@@ -461,30 +470,30 @@ export async function startInYourFaceRender() {
         const tw = textCache.width(fs, tok.text);
         
         if (!tok.isSpan) {
-          ctx.globalAlpha = alpha;
-          ctx.fillStyle = COL_MID;
-          ctx.shadowBlur = 0;
-          ctx.fillText(tok.text, x, y);
+          ctx2d.globalAlpha = alpha;
+          ctx2d.fillStyle = COL_MID;
+          ctx2d.shadowBlur = 0;
+          ctx2d.fillText(tok.text, x, y);
         } else {
           const past = t >= tok.end;
           const prog = (t >= tok.begin && !past)
             ? (t - tok.begin) / Math.max(tok.end - tok.begin, 0.001)
             : (past ? 1 : 0);
           
-          ctx.globalAlpha = alpha;
-          ctx.fillStyle = COL_MID;
-          ctx.shadowBlur = 0;
-          ctx.fillText(tok.text, x, y);
+          ctx2d.globalAlpha = alpha;
+          ctx2d.fillStyle = COL_MID;
+          ctx2d.shadowBlur = 0;
+          ctx2d.fillText(tok.text, x, y);
           
           if (prog > 0) {
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(x, y - fs, prog * tw, fs * 2);
-            ctx.clip();
-            ctx.fillStyle = COL_BRIGHT;
-            ctx.shadowBlur = 0;
-            ctx.fillText(tok.text, x, y);
-            ctx.restore();
+            ctx2d.save();
+            ctx2d.beginPath();
+            ctx2d.rect(x, y - fs, prog * tw, fs * 2);
+            ctx2d.clip();
+            ctx2d.fillStyle = COL_BRIGHT;
+            ctx2d.shadowBlur = 0;
+            ctx2d.fillText(tok.text, x, y);
+            ctx2d.restore();
           }
         }
         x += tw;
@@ -497,9 +506,9 @@ export async function startInYourFaceRender() {
     
     // Draw closing paren (only on last row)
     if (isLastRow) {
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = COL_MID;
-      ctx.shadowBlur = 0;
+      ctx2d.globalAlpha = alpha;
+      ctx2d.fillStyle = COL_MID;
+      ctx2d.shadowBlur = 0;
       
       // Find last span for closing paren color sweep
       let lastSpan = null;
@@ -583,10 +592,10 @@ export async function startInYourFaceRender() {
   let bleedLine       = null;
 
   // ── Main draw ─────────────────────────────────────────────────────────────
-  function drawFrame_iyf(t) {
+  function drawFrame_iyf(t, ctx2d = ctx) {
     _t = t;  // Update global time for getSpanY_iyf and color sweep calculations
-    ctx.fillStyle = BG;
-    ctx.fillRect(0, 0, W, H);
+    ctx2d.fillStyle = BG;
+    ctx2d.fillRect(0, 0, W, H);
 
     // Credit crossfade: lyrics fade out as credits fade in
     let lyricAlpha = 1;
@@ -594,7 +603,8 @@ export async function startInYourFaceRender() {
       lyricAlpha = Math.max(0, 1 - (t - CREDIT_START) / 0.8);
     }
 
-    const naPos = getCurrentNAPos(t);
+    const naPos = getFocusNAPos(t);
+    const activeNAPoses = getActiveNAPoses(t);
 
     // Detect transition to new line
     if (naPos !== lastNAPos) {
@@ -613,44 +623,64 @@ export async function startInYourFaceRender() {
     const transAge = transitionStart >= 0 ? Math.min(1, (t - transitionStart) / EASE_DUR) : 1;
     const eased    = easeOut(transAge);
 
+    // Stable ad-lib slot tracking
+    if (!state._iyfAdlibSlots) state._iyfAdlibSlots = new Map();
+    // Clean up finished ad-libs from slots
+    for (const [al, slot] of state._iyfAdlibSlots.entries()) {
+      if (t < al.lineBegin - ADLIB_FADE || t >= al.lineEnd + ADLIB_FADE) {
+        state._iyfAdlibSlots.delete(al);
+      }
+    }
+
     if (naPos >= 0 && lyricAlpha > 0) {
       const curLine  = nonAdlibs[naPos];
-      const curY     = CENTER_Y + LINE_SPACING * (1 - eased);
-
-      // Current line alpha: fade out if it's done and the next gap is ≥3s
-      let curAlpha = Math.max(0.05, eased) * lyricAlpha;
-      if (t >= curLine.lineEnd) {
-        const gap = gapAfter[naPos];
-        if (gap && gap.duration >= LINE_FADE_GAP) {
-          const fadeProgress = (t - curLine.lineEnd) / Math.min(0.6, gap.duration * 0.15);
-          curAlpha = Math.max(0, 1 - fadeProgress) * lyricAlpha;
-        }
-      }
-
+      
       // Previous slot: bleed only
-      if (bleedLine) {
+      if (bleedLine && !activeNAPoses.includes(nonAdlibs.indexOf(bleedLine))) {
         const prevY     = CENTER_Y - LINE_SPACING * eased;
         const bleedAge  = Math.max(0, (t - bleedLine.lineBegin) / Math.max(bleedLine.lineEnd - bleedLine.lineBegin, 0.001));
         const prevAlpha = Math.max(0, 0.6 * (1 - bleedAge)) * lyricAlpha;
-        // bleedLine is the line object that contains isV2 property
         const isV2 = bleedLine.isV2 || false;
-        if (prevAlpha > 0) drawLine(bleedLine, prevY, prevAlpha, 'active', t, isV2);
+        if (prevAlpha > 0) drawLine(bleedLine, prevY, prevAlpha, 'active', t, isV2, ctx2d);
       }
 
-      // Current line
-      // curLine is the line object that contains isV2 property
-      const isV2 = curLine.isV2 || false;
-      if (curAlpha > 0) drawLine(curLine, curY, curAlpha, 'active', t, isV2);
+      // Draw all active non-adlib lines
+      const totalActiveH = (activeNAPoses.length - 1) * (LINE_SPACING * 0.8);
+      activeNAPoses.forEach((idx, i) => {
+        const line = nonAdlibs[idx];
+        
+        // Vertical stacking if multiple lines are active
+        // Center the stack around the current scroll position
+        let stackOffset = (i * LINE_SPACING * 0.8) - (totalActiveH / 2);
+        const y = CENTER_Y + stackOffset + LINE_SPACING * (1 - eased);
 
-      // Adlib slot: fade in ADLIB_FADE before lineBegin, fade out ADLIB_FADE after lineEnd
-      // BUT: don't fade out if another adlib is coming within ADLIB_FADE time
+        let alpha = Math.max(0.05, eased) * lyricAlpha;
+        if (t >= line.lineEnd) {
+          const gap = gapAfter[idx];
+          if (gap && gap.duration >= LINE_FADE_GAP) {
+            const fadeProgress = (t - line.lineEnd) / Math.min(0.6, gap.duration * 0.15);
+            alpha = Math.max(0, 1 - fadeProgress) * lyricAlpha;
+          }
+        }
+        
+        if (alpha > 0) drawLine(line, y, alpha, 'active', t, line.isV2, ctx2d);
+      });
+
+      // Adlib slot: handle multiple simultaneous adlibs
       const activeAdlibs = adlibs.filter(a => {
-        // Adlib is active if we're within ADLIB_FADE before OR within the line OR within ADLIB_FADE after
         return t >= (a.lineBegin - ADLIB_FADE) && t < (a.lineEnd + ADLIB_FADE);
       });
       
-      if (activeAdlibs.length > 0) {
-        const al = activeAdlibs[0];
+      activeAdlibs.forEach((al) => {
+        // Assign stable slot if not already assigned
+        if (!state._iyfAdlibSlots.has(al)) {
+          const usedSlots = new Set(state._iyfAdlibSlots.values());
+          let slot = 0;
+          while (usedSlots.has(slot)) slot++;
+          state._iyfAdlibSlots.set(al, slot);
+        }
+        const slot = state._iyfAdlibSlots.get(al);
+
         // Fade in: starts ADLIB_FADE before lineBegin, reaches full at lineBegin
         const fadeInStart = al.lineBegin - ADLIB_FADE;
         let fadeIn = Math.min(1, Math.max(0, (t - fadeInStart) / ADLIB_FADE));
@@ -658,45 +688,57 @@ export async function startInYourFaceRender() {
         // Check if another adlib is coming within ADLIB_FADE time
         const nextAdlib = adlibs.find(a => a.lineBegin > al.lineEnd && a.lineBegin - t <= ADLIB_FADE);
         
-        // Fade out: starts at lineEnd, reaches 0 at lineEnd + ADLIB_FADE
-        // BUT: if another adlib is coming, stay at full opacity until it starts
+        // Fade out logic
         let fadeOut = 1;
         if (!nextAdlib) {
-          // No adlib coming soon, so fade out normally
           fadeOut = Math.min(1, Math.max(0, (al.lineEnd + ADLIB_FADE - t) / ADLIB_FADE));
         }
         
         const alAlpha = Math.min(fadeIn, fadeOut) * 0.8 * lyricAlpha;
         if (alAlpha > 0) {
-          drawAdlib(al, CENTER_Y + LINE_SPACING, alAlpha, t);
+          // Use the stable slot for adlibY
+          const adlibY = CENTER_Y + LINE_SPACING + (slot * (GHOST_SIZE + 20));
+          drawAdlib(al, adlibY, alAlpha, t, ctx2d);
         }
-      }
+      });
     }
 
     // ── Progress bar / gap bar ────────────────────────────────────────────
     const BAR_H = 4, BAR_Y = H - 36, BAR_PAD = 80, barW = W - BAR_PAD * 2;
     if (showProgBar && state.duration > 0) {
-      ctx.globalAlpha = 0.3;
-      ctx.fillStyle = COL_MID;
-      ctx.fillRect(BAR_PAD, BAR_Y, barW, BAR_H);
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = COL_ACTIVE;
-      ctx.fillRect(BAR_PAD, BAR_Y, barW * Math.min(t / state.duration, 1), BAR_H);
+      ctx2d.globalAlpha = 0.3;
+      ctx2d.fillStyle = COL_MID;
+      ctx2d.fillRect(BAR_PAD, BAR_Y, barW, BAR_H);
+      ctx2d.globalAlpha = 1;
+      ctx2d.fillStyle = COL_ACTIVE;
+      ctx2d.fillRect(BAR_PAD, BAR_Y, barW * Math.min(t / state.duration, 1), BAR_H);
     } else if (naPos >= 0) {
       const gap = gapAfter[naPos];
       if (gap && t >= gap.start && t < gap.end) {
         const gapProgress = (t - gap.start) / gap.duration;
-        ctx.globalAlpha = 0.3;
-        ctx.fillStyle = COL_MID;
-        ctx.fillRect(BAR_PAD, BAR_Y, barW, BAR_H);
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = COL_ACTIVE;
-        ctx.fillRect(BAR_PAD, BAR_Y, barW * gapProgress, BAR_H);
-        ctx.globalAlpha = 1;
+        ctx2d.globalAlpha = 0.3;
+        ctx2d.fillStyle = COL_MID;
+        ctx2d.fillRect(BAR_PAD, BAR_Y, barW, BAR_H);
+        ctx2d.globalAlpha = 1;
+        ctx2d.fillStyle = COL_ACTIVE;
+        ctx2d.fillRect(BAR_PAD, BAR_Y, barW * gapProgress, BAR_H);
+        ctx2d.globalAlpha = 1;
       }
     }
 
-    drawCredits(t);
+    drawCredits(t, ctx2d);
+  }
+
+  // ── Fast path: WebCodecs offline encoder ─────────────────────────────────
+  if (shouldUseFastRender()) {
+    clearRenderPreview();
+    const originalCtx = ctx;
+    await runFastRender((ctx2d, t, _W, _H) => {
+      ctx = ctx2d;
+      drawFrame_iyf(t);
+    }, 'iyf');
+    ctx = originalCtx;
+    return;
   }
 
   clearRenderPreview();

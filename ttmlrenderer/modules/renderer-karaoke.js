@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import { getExportQualityProfile, createTextMeasureCache, clearRenderPreview, updateRenderPreview, formatTime, resolveFilename } from './utils.js';
+import { shouldUseFastRender, runFastRender } from './encoder_v2.js?v=3';
 
 export async function startKaraokeRender() {
   state.renderCancelled  = false;
@@ -43,7 +44,7 @@ export async function startKaraokeRender() {
 
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d');
+  let ctx = canvas.getContext('2d');
   const textCache = createTextMeasureCache(ctx, fs => `bold ${fs}px "DM Mono", monospace`);
 
   function collectLineTokens(lineEl, lineSpans) {
@@ -463,6 +464,18 @@ export async function startKaraokeRender() {
       }
     }
     if (t >= CREDIT_FADE_START) drawCredits_rt(t);
+  }
+
+  // ── Fast path: WebCodecs offline encoder ─────────────────────────────────
+  if (shouldUseFastRender()) {
+    clearRenderPreview();
+    const originalCtx = ctx;
+    await runFastRender((ctx2d, t, _W, _H) => {
+      ctx = ctx2d;
+      drawFrame_rt(t);
+    }, 'karaoke');
+    ctx = originalCtx;
+    return;
   }
 
   clearRenderPreview();

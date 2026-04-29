@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import { getExportQualityProfile, createTextMeasureCache, clearRenderPreview, updateRenderPreview, formatTime, resolveFilename, hexToRGBA } from './utils.js';
+import { shouldUseFastRender, runFastRender } from './encoder_v2.js?v=3';
 
 export async function startAmlRender() {
   state.renderCancelled  = false;
@@ -43,7 +44,7 @@ export async function startAmlRender() {
 
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d');
+  let ctx = canvas.getContext('2d');
   const textCache = createTextMeasureCache(ctx, fs => `700 ${fs}px "SF Pro Display", sans-serif`);
 
   function clamp01(v) { return Math.max(0, Math.min(1, v)); }
@@ -447,6 +448,18 @@ export async function startAmlRender() {
       else drawLine(item.entry, t, offsetY, false);
     }
     for (const mainEntry of amlEntries) { if (mainEntry.adlib) drawAdlib(mainEntry.adlib, mainEntry, t, offsetY); }
+  }
+
+  // ── Fast path: WebCodecs offline encoder ─────────────────────────────────
+  if (shouldUseFastRender()) {
+    clearRenderPreview();
+    const originalCtx = ctx;
+    await runFastRender((ctx2d, t, _W, _H) => {
+      ctx = ctx2d;
+      drawFrame(t, getTargetOffset(t));
+    }, 'aml');
+    ctx = originalCtx;
+    return;
   }
 
   clearRenderPreview();
